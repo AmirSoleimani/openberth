@@ -1,3 +1,3 @@
 module github.com/openberth/openberth/apps/mcp
 
-go 1.22
+go 1.25.0

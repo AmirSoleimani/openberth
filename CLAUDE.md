@@ -294,7 +294,6 @@ user := h.requireAdmin(w, r)     // Returns admin user or writes 401/403
 GitHub Actions run on every PR and push to main:
 - **CI** (`.github/workflows/ci.yml`) — Build + vet matrix over all 3 Go modules + gallery. The `ci-pass` job is the single required check for branch protection.
 - **Lint** (`.github/workflows/lint.yml`) — `golangci-lint` v2 matrix over all 3 modules. Config at `.golangci.yml` (repo root).
-- **Security** (`.github/workflows/security.yml`) — `govulncheck` weekly + on push to main.
 - **Release** (`.github/workflows/release.yml`) — Tag-triggered, cross-compiles all binaries + checksums.
 - **Dependabot** (`.github/dependabot.yml`) — Weekly updates for Go modules, npm (gallery), and GitHub Actions.
 

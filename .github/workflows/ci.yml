@@ -14,14 +14,14 @@ jobs:
       matrix:
         module: [apps/server, apps/cli, apps/mcp]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ matrix.module }}/go.mod
 
       # Server module needs the gallery built first (embedded at compile time)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: matrix.module == 'apps/server'
         with:
           node-version: 20
@@ -42,9 +42,9 @@ jobs:
     name: Gallery
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm

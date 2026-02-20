@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "openberth": {
+      "command": "/usr/local/bin/berth-mcp",
+      "env": {
+        "BERTH_SERVER": "https://openberth.example.com",
+        "BERTH_KEY": "sc_your_api_key_here"
+      }
+    }
+  }
+}

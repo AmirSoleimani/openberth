@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Build & Vet (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [apps/server, apps/cli, apps/mcp]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+
+      # Server module needs the gallery built first (embedded at compile time)
+      - uses: actions/setup-node@v4
+        if: matrix.module == 'apps/server'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/server/gallery/package-lock.json
+
+      - name: Build gallery
+        if: matrix.module == 'apps/server'
+        run: cd apps/server/gallery && npm ci && npm run build
+
+      - name: Build
+        run: cd ${{ matrix.module }} && CGO_ENABLED=0 go build ./...
+
+      - name: Vet
+        run: cd ${{ matrix.module }} && go vet ./...
+
+  gallery:
+    name: Gallery
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/server/gallery/package-lock.json
+
+      - run: cd apps/server/gallery && npm ci && npm run build
+
+  ci-pass:
+    name: CI Pass
+    if: always()
+    needs: [go, gallery]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          if [[ "${{ needs.go.result }}" != "success" || "${{ needs.gallery.result }}" != "success" ]]; then
+            echo "CI failed"
+            exit 1
+          fi

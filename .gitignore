@@ -1,0 +1,42 @@
+# Build output
+/bin/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go workspace
+/go.work.sum
+
+# Node.js (gallery)
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+/secrets/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Landing pages (not part of core project)
+/landing*/
+
+# Gallery build artifacts (rebuilt by make)
+apps/server/gallery/dist/
+apps/server/gallery/tsconfig.app.tsbuildinfo
+
+# Example projects (local testing only)
+/examples/

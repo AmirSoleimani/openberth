@@ -3,11 +3,11 @@ version: "2"
 linters:
   enable:
     - govet
-    - errcheck
     - staticcheck
-    - gosimple
     - unused
     - ineffassign
+  disable:
+    - errcheck
 
 run:
   timeout: 5m

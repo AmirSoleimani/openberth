@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.17.0
-	github.com/rs/xid v1.5.0
+	github.com/rs/xid v1.6.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/oauth2 v0.35.0
 	modernc.org/sqlite v1.29.6

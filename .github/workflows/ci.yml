@@ -21,7 +21,7 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
 
       # Server module needs the gallery built first (embedded at compile time)
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: matrix.module == 'apps/server'
         with:
           node-version: 20
@@ -44,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm

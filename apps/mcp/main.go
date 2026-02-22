@@ -146,6 +146,7 @@ func (s *MCPServer) handle(req JSONRPCRequest) *JSONRPCResponse {
 					"name":    "openberth",
 					"version": version,
 				},
+				"instructions": "OpenBerth deploys code to live HTTPS URLs.\n\nDecision guide:\n1. ITERATIVE DEVELOPMENT (building step-by-step, multiple changes expected):\n   → berth_sandbox_create → berth_sandbox_push (instant updates) → berth_sandbox_promote (when done)\n2. ONE-SHOT DEPLOY (final code, no iteration):\n   → berth_deploy\n\nRules:\n- Call berth_list before creating new deployments to avoid duplicates.\n- After berth_deploy or berth_update, call berth_status to check build progress (builds take 15-60s). If 'failed', call berth_logs.\n- Prefer berth_sandbox_push over berth_update for active development — push is instant, update triggers a full rebuild.\n- When the user references a local directory or existing project, ALWAYS use berth_deploy_dir (not berth_deploy). It's faster, handles any project size, and respects .gitignore. Only use berth_deploy for code generated in conversation.\n- Similarly, prefer berth_update_dir over berth_update for local projects.",
 			},
 		}
 

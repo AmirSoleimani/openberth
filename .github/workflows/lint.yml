@@ -23,6 +23,17 @@ jobs:
         with:
           go-version-file: ${{ matrix.module }}/go.mod
 
+      - uses: actions/setup-node@v4
+        if: matrix.module == 'apps/server'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/server/gallery/package-lock.json
+
+      - name: Build gallery
+        if: matrix.module == 'apps/server'
+        run: cd apps/server/gallery && npm ci && npm run build
+
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.10.0

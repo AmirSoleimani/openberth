@@ -189,7 +189,7 @@ Claude Code, Aider, or any terminal AI can pipe JSON directly to the CLI:
 
 ```bash
 # Simple: just file paths to content
-echo '{"index.html": "<h1>Hello World</h1>"}' | openberth deploy --stdin
+echo '{"index.html": "<h1>Hello World</h1>"}' | berth deploy --stdin
 
 # Full: with options
 echo '{
@@ -199,8 +199,8 @@ echo '{
   },
   "name": "my-api",
   "env": {"SECRET": "abc"}
-}' | openberth deploy --stdin
+}' | berth deploy --stdin
 
 # Machine-readable output for agents
-echo '{"index.html": "..."}' | openberth deploy --stdin --json
+echo '{"index.html": "..."}' | berth deploy --stdin --json
 ```

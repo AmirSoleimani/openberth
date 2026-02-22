@@ -3,7 +3,7 @@
 A self-hosted deployment platform. Give it code, get a live URL.
 
 ```
-openberth deploy ./my-project --name my-project
+berth deploy ./my-project --name my-project
 # => https://my-project.openberth.example.com
 ```
 
@@ -40,26 +40,26 @@ Download the CLI for your platform from [Releases](https://github.com/openberth/
 
 | Platform | Binary |
 |----------|--------|
-| macOS (Apple Silicon) | `openberth-darwin-arm64` |
-| macOS (Intel) | `openberth-darwin-amd64` |
-| Linux | `openberth-linux-amd64` |
-| Windows | `openberth-windows-amd64.exe` |
+| macOS (Apple Silicon) | `berth-darwin-arm64` |
+| macOS (Intel) | `berth-darwin-amd64` |
+| Linux | `berth-linux-amd64` |
+| Windows | `berth-windows-amd64.exe` |
 
 ```bash
 # macOS example:
-chmod +x openberth-darwin-arm64
-sudo mv openberth-darwin-arm64 /usr/local/bin/openberth
+chmod +x berth-darwin-arm64
+sudo mv berth-darwin-arm64 /usr/local/bin/berth
 
-openberth config set server https://openberth.example.com
-openberth config set key sc_your_admin_key
+berth config set server https://openberth.example.com
+berth config set key sc_your_admin_key
 ```
 
 ### 4. Deploy something
 
 ```bash
-openberth deploy ./my-project           # deploy a directory
-openberth deploy App.jsx                # deploy a single file
-openberth deploy --name my-app          # exact subdomain (my-app.domain.com)
+berth deploy ./my-project           # deploy a directory
+berth deploy App.jsx                # deploy a single file
+berth deploy --name my-app          # exact subdomain (my-app.domain.com)
 ```
 
 ---
@@ -68,47 +68,47 @@ openberth deploy --name my-app          # exact subdomain (my-app.domain.com)
 
 ```bash
 # Deploy
-openberth deploy                              # current directory
-openberth deploy ./myproject                  # specific directory
-openberth deploy App.jsx                      # single file (auto-scaffolds Vite)
-openberth deploy --name my-app                # custom subdomain
-openberth deploy --ttl 7d                     # custom expiry (24h, 7d, 0=never)
-openberth deploy --memory 1g --cpus 1.0       # resource limits
-openberth deploy --env API_KEY=xxx            # environment variables
-openberth deploy --env-file .env.prod         # env vars from file
-openberth deploy --protect api_key            # deploy with access protection
-openberth deploy --network-quota 5g           # network transfer quota
+berth deploy                              # current directory
+berth deploy ./myproject                  # specific directory
+berth deploy App.jsx                      # single file (auto-scaffolds Vite)
+berth deploy --name my-app                # custom subdomain
+berth deploy --ttl 7d                     # custom expiry (24h, 7d, 0=never)
+berth deploy --memory 1g --cpus 1.0       # resource limits
+berth deploy --env API_KEY=xxx            # environment variables
+berth deploy --env-file .env.prod         # env vars from file
+berth deploy --protect api_key            # deploy with access protection
+berth deploy --network-quota 5g           # network transfer quota
 
 # Dev mode (live sync + hot reload)
-openberth dev                                 # start a sandbox
-openberth dev App.jsx                         # single file with hot reload
-openberth promote <id>                        # promote sandbox to production
+berth dev                                 # start a sandbox
+berth dev App.jsx                         # single file with hot reload
+berth promote <id>                        # promote sandbox to production
 
 # Update
-openberth update <id>                         # push code changes
-openberth update <id> --memory 2g             # change resource limits
-openberth update <id> --env-file .env.prod    # update env vars
+berth update <id>                         # push code changes
+berth update <id> --memory 2g             # change resource limits
+berth update <id> --env-file .env.prod    # update env vars
 
 # Manage
-openberth list                                # all deployments
-openberth status <id>                         # deployment details
-openberth logs <id>                           # container logs
-openberth destroy <id>                        # remove deployment
-openberth pull <id> --output ./backup         # download source
+berth list                                # all deployments
+berth status <id>                         # deployment details
+berth logs <id>                           # container logs
+berth destroy <id>                        # remove deployment
+berth pull <id> --output ./backup         # download source
 
 # Access control
-openberth protect <id> --mode basic_auth --username admin --password secret
-openberth protect <id> --mode api_key
-openberth protect <id> --mode user --users alice,bob
-openberth protect <id> --mode public          # remove protection
+berth protect <id> --mode basic_auth --username admin --password secret
+berth protect <id> --mode api_key
+berth protect <id> --mode user --users alice,bob
+berth protect <id> --mode public          # remove protection
 
 # Network quota
-openberth quota <id> --set 5g
-openberth quota <id> --remove
+berth quota <id> --set 5g
+berth quota <id> --remove
 
 # Lock / unlock
-openberth lock <id>                           # prevent all changes
-openberth unlock <id>
+berth lock <id>                           # prevent all changes
+berth unlock <id>
 ```
 
 ## AI Integration
@@ -161,7 +161,7 @@ The server also exposes a built-in MCP endpoint at `/mcp` (Streamable HTTP trans
 ### Stdin Pipe (Terminal Agents)
 
 ```bash
-echo '{"index.html": "<h1>Hello</h1>"}' | openberth deploy --stdin --json
+echo '{"index.html": "<h1>Hello</h1>"}' | berth deploy --stdin --json
 ```
 
 ## Supported Languages
@@ -194,10 +194,10 @@ Only `language` and `start` are required for unrecognized projects. All fields a
 Deploy `.jsx`, `.tsx`, `.vue`, `.svelte`, or `.html` files directly — the CLI auto-scaffolds a Vite project:
 
 ```bash
-openberth deploy App.jsx           # React
-openberth deploy dashboard.tsx     # React + TypeScript
-openberth deploy Widget.vue        # Vue
-openberth deploy Counter.svelte    # Svelte
+berth deploy App.jsx           # React
+berth deploy dashboard.tsx     # React + TypeScript
+berth deploy Widget.vue        # Vue
+berth deploy Counter.svelte    # Svelte
 ```
 
 The scaffolder parses imports to detect dependencies, detects Tailwind from class names, and produces a build-ready project.
@@ -298,7 +298,7 @@ Three binaries, all pure Go (`CGO_ENABLED=0`):
 | Binary | Description |
 |--------|-------------|
 | `berth-server` | Main daemon — API, containers, SQLite, Caddy config, MCP, gallery UI, self-installer |
-| `openberth` | Client CLI |
+| `berth` | Client CLI |
 | `berth-mcp` | Standalone MCP server for Claude Desktop / Cursor |
 
 ### Project Structure
@@ -355,7 +355,7 @@ See [Managing Users](docs/managing-users.md) for the admin HTTP API and settings
 
 **Container stuck in "building":**
 ```bash
-openberth logs <id>              # check build output
+berth logs <id>              # check build output
 journalctl -u openberth -f       # daemon logs
 ```
 
@@ -367,7 +367,7 @@ journalctl -u caddy -f            # Caddy logs
 ```
 
 **Wrong language version:**
-Add a version file (`.nvmrc`, `.python-version`) or check `openberth logs <id>` to see which image was used.
+Add a version file (`.nvmrc`, `.python-version`) or check `berth logs <id>` to see which image was used.
 
 ## Documentation
 

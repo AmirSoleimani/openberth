@@ -191,18 +191,9 @@ func (svc *Service) DeployTarball(user *store.User, p TarballDeployParams) (*Dep
 
 // UpdateTarball handles a tarball-based update.
 func (svc *Service) UpdateTarball(user *store.User, p TarballUpdateParams) (*UpdateResult, error) {
-	deploy, err := svc.Store.GetDeployment(p.DeployID)
-	if err != nil || deploy == nil {
-		return nil, ErrNotFound("Deployment not found.")
-	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
-		return nil, ErrForbidden("Not your deployment.")
-	}
-	if deploy.Status != "running" && deploy.Status != "failed" {
-		return nil, ErrBadRequest(fmt.Sprintf("Cannot update deployment in '%s' state.", deploy.Status))
-	}
-	if deploy.Locked {
-		return nil, ErrBadRequest("Deployment is locked. Unlock it first.")
+	deploy, err := svc.updateOwnerGuard(p.DeployID, user)
+	if err != nil {
+		return nil, err
 	}
 
 	codeDir := filepath.Join(svc.Cfg.DeploysDir, deploy.ID)
@@ -210,43 +201,7 @@ func (svc *Service) UpdateTarball(user *store.User, p TarballUpdateParams) (*Upd
 		return nil, ErrBadRequest("Failed to extract: " + err.Error())
 	}
 
-	fw := framework.DetectWithOverrides(codeDir)
-	if fw == nil {
-		return nil, ErrBadRequest("Could not detect framework in updated code. Add a .berth.json with \"language\" and \"start\" fields.")
-	}
-
-	// Merge env: start with existing, override with any new values
-	envVars := map[string]string{}
-	if deploy.EnvJSON != "" && deploy.EnvJSON != "{}" {
-		json.Unmarshal([]byte(deploy.EnvJSON), &envVars)
-	}
-	for k, v := range p.EnvVars {
-		envVars[k] = v
-	}
-
-	port := resolvePort(p.Port, fw.Port)
-
-	// Preserve existing deployment settings unless explicitly overridden
-	memory := coalesce(p.Memory, deploy.Memory)
-	cpus := coalesce(p.CPUs, deploy.CPUs)
-	quota := deploy.NetworkQuota
-	if p.NetworkQuota != "" {
-		quota = p.NetworkQuota
-	}
-
-	if b, err := json.Marshal(envVars); err == nil {
-		svc.Store.UpdateDeploymentEnvJSON(deploy.ID, string(b))
-	}
-	svc.Store.UpdateDeploymentStatus(deploy.ID, "updating")
-
-	svc.rebuildAndStart(deploy, user.Name, fwInfo(fw), port, envVars, memory, cpus, quota, "update")
-
-	return &UpdateResult{
-		ID:      deploy.ID,
-		Status:  "updating",
-		URL:     svc.deployURL(deploy.Subdomain),
-		Message: "Code uploaded. Rebuilding dependencies and restarting...",
-	}, nil
+	return svc.detectAndRebuild(deploy, user.Name, p.EnvVars, p.Port, p.Memory, p.CPUs, p.NetworkQuota, "update")
 }
 
 // RebuildAll rebuilds all non-destroyed deployments from source code on disk.

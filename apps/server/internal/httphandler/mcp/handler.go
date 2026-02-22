@@ -652,7 +652,7 @@ func (m *MCPHandler) toolUpdateQuota(args json.RawMessage, user *store.User) *mc
 		return errorResult(err.Error())
 	}
 
-	msg := fmt.Sprintf("Network quota updated for deployment %s.", params.ID)
+	var msg string
 	if result.NetworkQuota == "" {
 		msg = fmt.Sprintf("Network quota removed from deployment %s.", params.ID)
 	} else {

@@ -46,16 +46,25 @@ echo "✓ Build complete"
 `, fw.BuildCmd)
 	}
 
-	return fmt.Sprintf(`#!/bin/sh
-set -e
-echo "🏰 [build] Python project"
+	installBlock := ""
+	if fw.InstallCmd != "" {
+		installBlock = fmt.Sprintf(`
+if [ -d "/old/venv" ]; then
+  echo "♻ Rebuild — copying cached venv..."
+  (cd /old && tar cf - venv) | tar xf -
+  export PATH="/app/venv/bin:$PATH"
+else
+  echo "📦 Creating virtual environment..."
+  python -m venv /app/venv 2>&1
+  export PATH="/app/venv/bin:$PATH"
+fi
 
-cd /app
-
-# Copy code to build volume
-cp -r /app/code/. /app/ 2>&1
-echo "✓ Code copied"
-
+echo "📦 Installing dependencies (custom)..."
+%s 2>&1
+echo "✓ Dependencies installed"
+`, fw.InstallCmd)
+	} else {
+		installBlock = `
 # Determine requirements file for hash comparison
 req_file_hash() {
   for RF in requirements.txt pyproject.toml Pipfile.lock; do
@@ -101,10 +110,22 @@ else
   echo "📦 Installing dependencies..."
   install_deps
 fi
-%s
+`
+	}
+
+	return fmt.Sprintf(`#!/bin/sh
+set -e
+echo "🏰 [build] Python project"
+
+cd /app
+
+# Copy code to build volume
+cp -r /app/code/. /app/ 2>&1
+echo "✓ Code copied"
+%s%s
 rm -f /app/.openberth-build.sh /app/.openberth-run.sh
 echo "🏰 [build] Complete"
-`, buildStep)
+`, installBlock, buildStep)
 }
 
 func (p *PythonProvider) RunScript(fw *FrameworkInfo) string {
@@ -128,6 +149,22 @@ func (p *PythonProvider) CacheVolumes(userID string) []string {
 func (p *PythonProvider) RebuildCopyScript() string { return "" }
 
 func (p *PythonProvider) SandboxEntrypoint(fw *FrameworkInfo, port int) string {
+	installStep := `# Install dependencies
+if [ -f requirements.txt ]; then
+  echo "🏰 [sandbox] Installing from requirements.txt..."
+  pip install -r requirements.txt 2>&1
+elif [ -f pyproject.toml ]; then
+  echo "🏰 [sandbox] Installing from pyproject.toml..."
+  pip install . 2>&1
+elif [ -f Pipfile ]; then
+  echo "🏰 [sandbox] Installing from Pipfile..."
+  pip install pipenv 2>&1 && pipenv install 2>&1
+fi`
+	if fw.InstallCmd != "" {
+		installStep = fmt.Sprintf(`echo "🏰 [sandbox] Installing dependencies (custom)..."
+%s 2>&1`, fw.InstallCmd)
+	}
+
 	return fmt.Sprintf(`#!/bin/sh
 set -e
 cd /app
@@ -141,17 +178,7 @@ fi
 # Activate venv
 export PATH="/app/venv/bin:$PATH"
 
-# Install dependencies
-if [ -f requirements.txt ]; then
-  echo "🏰 [sandbox] Installing from requirements.txt..."
-  pip install -r requirements.txt 2>&1
-elif [ -f pyproject.toml ]; then
-  echo "🏰 [sandbox] Installing from pyproject.toml..."
-  pip install . 2>&1
-elif [ -f Pipfile ]; then
-  echo "🏰 [sandbox] Installing from Pipfile..."
-  pip install pipenv 2>&1 && pipenv install 2>&1
-fi
+%s
 
 echo "🏰 [sandbox] Starting dev server..."
 while true; do
@@ -159,7 +186,7 @@ while true; do
   echo "🏰 [sandbox] Dev server exited, restarting in 2s..."
   sleep 2
 done
-`, fw.DevCmd)
+`, installStep, fw.DevCmd)
 }
 
 func (p *PythonProvider) SandboxEnv() map[string]string { return nil }

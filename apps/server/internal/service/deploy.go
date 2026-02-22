@@ -171,9 +171,9 @@ func (svc *Service) UpdateCode(user *store.User, p CodeUpdateParams) (*UpdateRes
 		os.WriteFile(fullPath, []byte(content), 0644)
 	}
 
-	fw := framework.DetectFramework(codeDir)
+	fw := framework.DetectWithOverrides(codeDir)
 	if fw == nil {
-		return nil, ErrBadRequest("Could not detect framework in updated code.")
+		return nil, ErrBadRequest("Could not detect framework in updated code. Add a .berth.json with \"language\" and \"start\" fields.")
 	}
 
 	envVars := ensureEnv(p.Env)

@@ -175,6 +175,20 @@ echo '{"index.html": "<h1>Hello</h1>"}' | openberth deploy --stdin --json
 
 Versions are detected automatically. If your `go.mod` says `go 1.23`, the build runs in `golang:1.23`. If `.python-version` says `3.11`, it uses `python:3.11-slim`.
 
+Framework is auto-detected. If detection is wrong or your project isn't recognized, add a `.berth.json` with override fields:
+
+```json
+{
+  "language": "node",
+  "start": "node dist/server.js",
+  "build": "npm run build",
+  "install": "pnpm install --frozen-lockfile",
+  "dev": "npm run dev -- --host 0.0.0.0 --port $PORT"
+}
+```
+
+Only `language` and `start` are required for unrecognized projects. All fields are optional if detection succeeds — set only the ones you want to override.
+
 ### Single-File Deploy
 
 Deploy `.jsx`, `.tsx`, `.vue`, `.svelte`, or `.html` files directly — the CLI auto-scaffolds a Vite project:

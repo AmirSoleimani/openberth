@@ -24,7 +24,6 @@ var defaultIgnores = []string{
 	".env.local",
 	".openberth-entry.sh",
 	".openberth-sandbox.sh",
-	".berth.json",
 }
 
 // loadIgnorePatterns reads .gitignore and .berthignore from dir and merges

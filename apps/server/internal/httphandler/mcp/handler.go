@@ -127,7 +127,7 @@ func (m *MCPHandler) dispatch(req mcpRequest, user *store.User) *mcpResponse {
 					"name":    "openberth",
 					"version": m.version,
 				},
-				"instructions": "OpenBerth deploys code to live HTTPS URLs.\n\nDecision guide:\n1. ITERATIVE DEVELOPMENT (building step-by-step, multiple changes expected):\n   → berth_sandbox_create → berth_sandbox_push (instant updates) → berth_sandbox_promote (when done)\n2. ONE-SHOT DEPLOY (final code, no iteration):\n   → berth_deploy\n\nRules:\n- Call berth_list before creating new deployments to avoid duplicates.\n- After berth_deploy or berth_update, call berth_status to check build progress (builds take 15-60s). If 'failed', call berth_logs.\n- Prefer berth_sandbox_push over berth_update for active development — push is instant, update triggers a full rebuild.",
+				"instructions": "OpenBerth deploys code to live HTTPS URLs.\n\nDecision guide:\n1. ITERATIVE DEVELOPMENT (building step-by-step, multiple changes expected):\n   → berth_sandbox_create → berth_sandbox_push (instant updates) → berth_sandbox_promote (when done)\n2. ONE-SHOT DEPLOY (final code, no iteration):\n   → berth_deploy\n\nRules:\n- Call berth_list before creating new deployments to avoid duplicates.\n- After berth_deploy or berth_update, call berth_status to check build progress (builds take 15-60s). If 'failed', call berth_logs.\n- Prefer berth_sandbox_push over berth_update for active development — push is instant, update triggers a full rebuild.\n- Framework is auto-detected. If wrong or unsupported, include a .berth.json with \"language\" and \"start\" fields. Override fields: language, build, start, install, dev.",
 			},
 		}
 

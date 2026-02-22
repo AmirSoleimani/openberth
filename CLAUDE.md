@@ -165,6 +165,8 @@ When a user provides an explicit `name`, it becomes the exact subdomain (e.g. `n
 
 `internal/framework/` implements the `LanguageProvider` interface. Detection order: Go → Python → Node → Static (first match wins). Each provider handles detection, version selection, build/run commands, and cache volumes.
 
+All detection callsites use `framework.DetectWithOverrides(codeDir)` which reads `.berth.json` overrides, applies them on top of detected results, or falls back to `DefaultsForLanguage()` when detection fails but config has `language` + `start`.
+
 When adding a new framework, implement the provider interface and register it — don't add special cases in the handlers.
 
 ### Security Model
@@ -212,6 +214,36 @@ Both MCP implementations must stay in sync:
 6. Tool descriptions are prescriptive — tell AI *when* to use, *when not* to, and *what to expect*
 7. Response messages should include next-step guidance with deployment IDs
 
+### Framework Override via `.berth.json`
+
+When auto-detection is wrong or fails, users can include a `.berth.json` in their project with server-side override fields:
+
+```json
+{
+  "language": "node",
+  "build": "npm run build",
+  "start": "node dist/server.js",
+  "install": "pnpm install --frozen-lockfile",
+  "dev": "npm run dev -- --host 0.0.0.0 --port $PORT"
+}
+```
+
+| Field | Overrides | Required for fallback? |
+|-------|-----------|----------------------|
+| `language` | Forces provider selection (`node`, `python`, `go`, `static`) | Yes |
+| `build` | `FrameworkInfo.BuildCmd` | No |
+| `start` | `FrameworkInfo.StartCmd` | Yes |
+| `install` | Install step in provider build/sandbox scripts (`FrameworkInfo.InstallCmd`) | No |
+| `dev` | `FrameworkInfo.DevCmd` (sandbox mode) | No |
+
+**Two modes:**
+1. **Detection succeeds + overrides** — Patches specific `FrameworkInfo` fields onto the detected result
+2. **Detection fails + `.berth.json` has `language` + `start`** — Constructs `FrameworkInfo` from `DefaultsForLanguage()` + overrides
+
+These coexist with existing CLI fields (`name`, `ttl`, `memory`, `port`, etc.) in the same file. The CLI reads its fields client-side; the server reads override fields server-side from the code directory.
+
+Implementation: `framework/overrides.go` (`ReadBerthConfig`, `ApplyOverrides`, `DetectWithOverrides`). All detection callsites use `DetectWithOverrides()` instead of `DetectFramework()`.
+
 ### Adding a New Language/Framework
 
 1. Create `internal/framework/lang_<name>.go` implementing the `LanguageProvider` interface
@@ -226,6 +258,8 @@ Both MCP implementations must stay in sync:
    - `SandboxEntrypoint(fw, port)` — dev server startup script
    - `SandboxEnv()` — sandbox-specific env overrides
    - `StaticOnly()` — true if no build/run needed
+4. Honor `fw.InstallCmd` in `BuildScript()` and `SandboxEntrypoint()` — if set, use it instead of the auto-detected install command
+5. Note: `.berth.json` overrides provide an escape hatch for unsupported frameworks without adding a new provider
 
 ### Adding a New CLI Command
 
@@ -248,7 +282,8 @@ These identifiers are used across container, proxy, and service layers. Keep the
 | Run script | `.openberth-run.sh` | Written into deploy volume |
 | Sandbox script | `.openberth-sandbox.sh` | Written into deploy volume |
 | CLI entry script | `.openberth-entry.sh` | Auto-scaffold entrypoint |
-| CLI config file | `.berth.json` | Per-project config |
+| CLI config file | `.berth.json` | Per-project CLI config (name, ttl, memory, etc.) |
+| Server-side overrides | `.berth.json` | Framework override fields (language, build, start, install, dev) — read server-side |
 | Ignore file | `.berthignore` | Like .gitignore for deploys |
 | Cookie name | `openberth_session` | Browser auth |
 | API key prefix | `sc_` | Kept for backwards compat |

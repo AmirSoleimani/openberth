@@ -83,6 +83,7 @@ func (svc *Service) CreateSandbox(user *store.User, p SandboxCreateParams) (*Dep
 			Framework:    fw.Framework,
 			Language:     fw.Language,
 			DevCmd:       devCmd,
+			InstallCmd:   fw.InstallCmd,
 			Port:         port,
 			Image:        fw.Image,
 			FrameworkEnv: fw.Env,
@@ -318,9 +319,9 @@ func (svc *Service) PromoteSandbox(user *store.User, p PromoteParams) (*DeployRe
 
 	codeDir := filepath.Join(svc.Cfg.DeploysDir, deploy.ID)
 
-	fw := framework.DetectFramework(codeDir)
+	fw := framework.DetectWithOverrides(codeDir)
 	if fw == nil {
-		return nil, ErrInternal("Could not detect framework from sandbox code.")
+		return nil, ErrInternal("Could not detect framework from sandbox code. Add a .berth.json with \"language\" and \"start\" fields.")
 	}
 
 	if fw.Framework != "static" && fw.BuildCmd == "" && fw.StartCmd == "" {

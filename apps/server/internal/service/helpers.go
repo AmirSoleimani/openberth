@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openberth/openberth/apps/server/internal/framework"
 )
 
 // SanitizeName cleans a user-provided name for use as a subdomain component.
@@ -118,6 +120,11 @@ func detectProjectLang(codeDir string) string {
 
 // detectInstallCmd returns the appropriate install command for a project directory.
 func detectInstallCmd(codeDir string) string {
+	// Check .berth.json for a custom install override
+	if cfg := framework.ReadBerthConfig(codeDir); cfg != nil && cfg.Install != "" {
+		return "cd /app && " + cfg.Install + " 2>&1"
+	}
+
 	lang := detectProjectLang(codeDir)
 	switch lang {
 	case "go":

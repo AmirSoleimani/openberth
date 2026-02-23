@@ -68,6 +68,7 @@ type CreateOpts struct {
 	RunImage     string // runtime image (empty = same as Image)
 	BuildCmd     string
 	StartCmd     string
+	InstallCmd   string // custom install override from .berth.json
 	CacheDir     string // what to preserve on rebuild (node_modules, target, venv)
 	FrameworkEnv map[string]string
 	UserEnv      map[string]string
@@ -426,6 +427,7 @@ type SandboxOpts struct {
 	Framework    string
 	Language     string
 	DevCmd       string // e.g. "npx vite dev --host 0.0.0.0 --port $PORT"
+	InstallCmd   string // custom install override from .berth.json
 	Port         int    // container port
 	Image        string // e.g. node:20-slim
 	FrameworkEnv map[string]string
@@ -704,26 +706,28 @@ func execCmdTimeout(name string, timeout time.Duration, args ...string) (string,
 // fwInfoFromOpts reconstructs a FrameworkInfo from CreateOpts for provider calls.
 func fwInfoFromOpts(opts CreateOpts) *framework.FrameworkInfo {
 	return &framework.FrameworkInfo{
-		Framework: opts.Framework,
-		Language:  opts.Language,
-		BuildCmd:  opts.BuildCmd,
-		StartCmd:  opts.StartCmd,
-		Port:      opts.Port,
-		Image:     opts.Image,
-		RunImage:  opts.RunImage,
-		CacheDir:  opts.CacheDir,
-		Env:       opts.FrameworkEnv,
+		Framework:  opts.Framework,
+		Language:   opts.Language,
+		BuildCmd:   opts.BuildCmd,
+		StartCmd:   opts.StartCmd,
+		InstallCmd: opts.InstallCmd,
+		Port:       opts.Port,
+		Image:      opts.Image,
+		RunImage:   opts.RunImage,
+		CacheDir:   opts.CacheDir,
+		Env:        opts.FrameworkEnv,
 	}
 }
 
 // fwInfoFromSandboxOpts reconstructs a FrameworkInfo from SandboxOpts for provider calls.
 func fwInfoFromSandboxOpts(opts SandboxOpts) *framework.FrameworkInfo {
 	return &framework.FrameworkInfo{
-		Framework: opts.Framework,
-		Language:  opts.Language,
-		DevCmd:    opts.DevCmd,
-		Port:      opts.Port,
-		Image:     opts.Image,
-		Env:       opts.FrameworkEnv,
+		Framework:  opts.Framework,
+		Language:   opts.Language,
+		DevCmd:     opts.DevCmd,
+		InstallCmd: opts.InstallCmd,
+		Port:       opts.Port,
+		Image:      opts.Image,
+		Env:        opts.FrameworkEnv,
 	}
 }

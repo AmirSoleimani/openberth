@@ -181,14 +181,15 @@ type buildStartParams struct {
 
 // frameworkInfo is a subset of framework.Detection used by the build goroutine.
 type frameworkInfo struct {
-	Framework string
-	Language  string
-	Image     string
-	RunImage  string
-	BuildCmd  string
-	StartCmd  string
-	CacheDir  string
-	Env       map[string]string
+	Framework  string
+	Language   string
+	Image      string
+	RunImage   string
+	BuildCmd   string
+	StartCmd   string
+	InstallCmd string
+	CacheDir   string
+	Env        map[string]string
 }
 
 // accessControlInfo holds computed access control for a deployment.

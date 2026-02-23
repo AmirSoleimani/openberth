@@ -2,16 +2,17 @@ package framework
 
 // FrameworkInfo describes the detected language, framework, and build/run commands for a project.
 type FrameworkInfo struct {
-	Framework string            `json:"framework"`
-	Language  string            `json:"language"` // "node", "go", "python"
-	BuildCmd  string            `json:"buildCmd"`
-	StartCmd  string            `json:"startCmd"`
-	Port      int               `json:"port"`
-	Image     string            `json:"image"`    // build image
-	RunImage  string            `json:"runImage"` // runtime image (empty = same as Image)
-	CacheDir  string            `json:"cacheDir"` // what to copy on rebuild (e.g. "node_modules", "target")
-	Env       map[string]string `json:"env,omitempty"`
-	DevCmd    string            `json:"devCmd,omitempty"` // dev server command (sandbox mode)
+	Framework  string            `json:"framework"`
+	Language   string            `json:"language"` // "node", "go", "python"
+	BuildCmd   string            `json:"buildCmd"`
+	StartCmd   string            `json:"startCmd"`
+	InstallCmd string            `json:"installCmd,omitempty"` // custom install override from .berth.json
+	Port       int               `json:"port"`
+	Image      string            `json:"image"`    // build image
+	RunImage   string            `json:"runImage"` // runtime image (empty = same as Image)
+	CacheDir   string            `json:"cacheDir"` // what to copy on rebuild (e.g. "node_modules", "target")
+	Env        map[string]string `json:"env,omitempty"`
+	DevCmd     string            `json:"devCmd,omitempty"` // dev server command (sandbox mode)
 }
 
 // LanguageProvider encapsulates all language-specific logic: detection, build/run
@@ -53,6 +54,48 @@ func DetectFramework(projectDir string) *FrameworkInfo {
 		}
 	}
 	return nil
+}
+
+// DefaultsForLanguage returns a minimal FrameworkInfo with default images, ports, and env
+// for a given language. Used when detection fails but .berth.json provides enough info.
+func DefaultsForLanguage(language string) *FrameworkInfo {
+	switch language {
+	case "node":
+		return &FrameworkInfo{
+			Framework: "node",
+			Language:  "node",
+			Port:      3000,
+			Image:     "node:" + DefaultNodeVersion + "-slim",
+			CacheDir:  "node_modules",
+		}
+	case "python":
+		return &FrameworkInfo{
+			Framework: "python",
+			Language:  "python",
+			Port:      8000,
+			Image:     "python:" + DefaultPythonVersion + "-slim",
+			CacheDir:  "venv",
+			Env:       map[string]string{"PYTHONUNBUFFERED": "1"},
+		}
+	case "go":
+		return &FrameworkInfo{
+			Framework: "go",
+			Language:  "go",
+			Port:      8080,
+			Image:     "golang:" + DefaultGoVersion,
+			RunImage:  ImageRuntimeSlim,
+			Env:       map[string]string{"GIN_MODE": "release"},
+		}
+	case "static":
+		return &FrameworkInfo{
+			Framework: "static",
+			Language:  "static",
+			Port:      8080,
+			Image:     ImageStatic,
+		}
+	default:
+		return nil
+	}
 }
 
 func init() {

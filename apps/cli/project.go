@@ -40,7 +40,22 @@ func loadProjectConfig(dir string) *ProjectConfig {
 }
 
 func saveProjectConfig(dir string, cfg *ProjectConfig) error {
-	data, _ := json.MarshalIndent(cfg, "", "  ")
+	// Read existing file as raw map to preserve unknown keys (e.g. server-side
+	// override fields: language, build, start, install, dev).
+	merged := make(map[string]any)
+	if existing, err := os.ReadFile(projectConfigPath(dir)); err == nil {
+		json.Unmarshal(existing, &merged)
+	}
+
+	// Marshal CLI fields to a map so we only set non-empty ones.
+	cliData, _ := json.Marshal(cfg)
+	var cliMap map[string]any
+	json.Unmarshal(cliData, &cliMap)
+	for k, v := range cliMap {
+		merged[k] = v
+	}
+
+	data, _ := json.MarshalIndent(merged, "", "  ")
 	data = append(data, '\n')
 	return os.WriteFile(projectConfigPath(dir), data, 0644)
 }

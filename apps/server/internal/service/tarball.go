@@ -210,9 +210,9 @@ func (svc *Service) UpdateTarball(user *store.User, p TarballUpdateParams) (*Upd
 		return nil, ErrBadRequest("Failed to extract: " + err.Error())
 	}
 
-	fw := framework.DetectFramework(codeDir)
+	fw := framework.DetectWithOverrides(codeDir)
 	if fw == nil {
-		return nil, ErrBadRequest("Could not detect framework in updated code.")
+		return nil, ErrBadRequest("Could not detect framework in updated code. Add a .berth.json with \"language\" and \"start\" fields.")
 	}
 
 	envVars := ensureEnv(p.EnvVars)
@@ -265,7 +265,7 @@ func (svc *Service) RebuildAll() int {
 			continue
 		}
 
-		fw := framework.DetectFramework(codeDir)
+		fw := framework.DetectWithOverrides(codeDir)
 		if fw == nil {
 			log.Printf("[restore] Cannot detect framework for %s, marking as failed", d.Subdomain)
 			svc.Store.UpdateDeploymentStatus(d.ID, "failed")
@@ -294,6 +294,7 @@ func (svc *Service) RebuildAll() int {
 				RunImage:     fw.RunImage,
 				BuildCmd:     fw.BuildCmd,
 				StartCmd:     fw.StartCmd,
+				InstallCmd:   fw.InstallCmd,
 				CacheDir:     fw.CacheDir,
 				FrameworkEnv: fw.Env,
 				UserEnv:      env,

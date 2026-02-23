@@ -5,7 +5,7 @@ func tools() []mcpTool {
 	return []mcpTool{
 		{
 			Name:        "berth_deploy",
-			Description: "Deploy a small set of AI-generated files to a live HTTPS URL. Provide files as a map of filepath to content. Best for 1-100 files generated in conversation.\n\nFor iterative development where you'll make multiple changes, use berth_sandbox_create instead — it supports instant hot-reload without full rebuilds.",
+			Description: "Deploy a small set of AI-generated files to a live HTTPS URL. Provide files as a map of filepath to content. Best for 1-100 files generated in conversation.\n\nFor iterative development where you'll make multiple changes, use berth_sandbox_create instead — it supports instant hot-reload without full rebuilds.\n\nFramework is auto-detected. If detection fails, include a .berth.json file with override fields (language, build, start, install, dev).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -127,7 +127,7 @@ func tools() []mcpTool {
 		// ── Sandbox tools ────────────────────────────────────────────
 		{
 			Name:        "berth_sandbox_create",
-			Description: "Create a live development sandbox with hot reload. File changes via berth_sandbox_push apply instantly — no full rebuild needed.\n\nUSE SANDBOX (not deploy) when:\n- The user wants to iterate on code (they'll make multiple changes)\n- You're building something step-by-step\n- You want to test changes quickly before finalizing\n\nSupports: static HTML, Node.js (Vite/Next.js/Nuxt/SvelteKit), Python (FastAPI/Flask/Django), Go.\n\nAfter creation, use berth_sandbox_push to update files instantly. When done iterating, use berth_sandbox_promote to create an optimized production deployment.",
+			Description: "Create a live development sandbox with hot reload. File changes via berth_sandbox_push apply instantly — no full rebuild needed.\n\nUSE SANDBOX (not deploy) when:\n- The user wants to iterate on code (they'll make multiple changes)\n- You're building something step-by-step\n- You want to test changes quickly before finalizing\n\nSupports: static HTML, Node.js (Vite/Next.js/Nuxt/SvelteKit), Python (FastAPI/Flask/Django), Go.\n\nAfter creation, use berth_sandbox_push to update files instantly. When done iterating, use berth_sandbox_promote to create an optimized production deployment.\n\nFramework is auto-detected. If detection fails, include a .berth.json file with override fields (language, build, start, install, dev).",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{

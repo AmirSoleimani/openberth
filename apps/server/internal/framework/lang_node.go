@@ -138,16 +138,26 @@ echo "✓ Build complete"
 		vitePatch = "\n" + viteAllowHostsScript() + "\n"
 	}
 
-	return fmt.Sprintf(`#!/bin/sh
-set -e
-echo "🏰 [build] Node.js project"
+	// If a custom install command is provided, use it instead of auto-detecting
+	customInstall := ""
+	if fw.InstallCmd != "" {
+		customInstall = fw.InstallCmd
+	}
 
-cd /app
+	installBlock := ""
+	if customInstall != "" {
+		installBlock = fmt.Sprintf(`
+if [ -d "/old/node_modules" ]; then
+  echo "♻ Rebuild — copying cached node_modules..."
+  (cd /old && tar cf - node_modules) | tar xf -
+fi
 
-# Copy code to build volume
-cp -r /app/code/. /app/ 2>&1
-echo "✓ Code copied"
-%s
+echo "📦 Installing dependencies (custom)..."
+%s 2>&1
+echo "✓ Dependencies installed ($(du -sh /app/node_modules 2>/dev/null | cut -f1))"
+`, customInstall)
+	} else {
+		installBlock = `
 # Determine lockfile for hash comparison
 lock_file_hash() {
   for LF in package-lock.json yarn.lock pnpm-lock.yaml package.json; do
@@ -192,10 +202,22 @@ else
   fi
   echo "✓ Dependencies installed ($(du -sh /app/node_modules 2>/dev/null | cut -f1))"
 fi
-%s
+`
+	}
+
+	return fmt.Sprintf(`#!/bin/sh
+set -e
+echo "🏰 [build] Node.js project"
+
+cd /app
+
+# Copy code to build volume
+cp -r /app/code/. /app/ 2>&1
+echo "✓ Code copied"
+%s%s%s
 rm -f /app/.openberth-build.sh /app/.openberth-run.sh
 echo "🏰 [build] Complete"
-`, vitePatch, buildStep)
+`, vitePatch, installBlock, buildStep)
 }
 
 func (p *NodeProvider) RunScript(fw *FrameworkInfo) string {
@@ -218,15 +240,21 @@ func (p *NodeProvider) CacheVolumes(userID string) []string {
 func (p *NodeProvider) RebuildCopyScript() string { return "" }
 
 func (p *NodeProvider) SandboxEntrypoint(fw *FrameworkInfo, port int) string {
+	installStep := `# Install dependencies (first boot or package.json changed)
+if [ -f package.json ]; then
+  echo "🏰 [sandbox] Installing dependencies..."
+  npm install 2>&1
+fi`
+	if fw.InstallCmd != "" {
+		installStep = fmt.Sprintf(`echo "🏰 [sandbox] Installing dependencies (custom)..."
+%s 2>&1`, fw.InstallCmd)
+	}
+
 	return fmt.Sprintf(`#!/bin/sh
 set -e
 cd /app
 
-# Install dependencies (first boot or package.json changed)
-if [ -f package.json ]; then
-  echo "🏰 [sandbox] Installing dependencies..."
-  npm install 2>&1
-fi
+%s
 
 # Allow all hosts for Vite dev/preview servers (runs behind a reverse proxy)
 %s
@@ -237,7 +265,7 @@ while true; do
   echo "🏰 [sandbox] Dev server exited, restarting in 2s..."
   sleep 2
 done
-`, viteAllowHostsScript(), fw.DevCmd)
+`, installStep, viteAllowHostsScript(), fw.DevCmd)
 }
 
 // viteAllowHostsScript returns a shell snippet (node one-liner) that patches

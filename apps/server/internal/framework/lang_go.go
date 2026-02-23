@@ -42,17 +42,7 @@ func (p *GoProvider) Detect(projectDir string) *FrameworkInfo {
 }
 
 func (p *GoProvider) BuildScript(fw *FrameworkInfo) string {
-	return fmt.Sprintf(`#!/bin/sh
-set -e
-echo "🏰 [build] Go project"
-
-cd /app
-
-# Copy code to build volume
-cp -r /app/code/. /app/ 2>&1
-echo "✓ Code copied"
-
-# Check dependencies (modules are in shared cache volume)
+	downloadStep := `# Check dependencies (modules are in shared cache volume)
 OLD_HASH=""
 NEW_HASH=""
 if [ -f "/old/go.sum" ]; then
@@ -68,7 +58,24 @@ else
   echo "📦 Downloading modules..."
   go mod download 2>&1
   echo "✓ Modules downloaded"
-fi
+fi`
+	if fw.InstallCmd != "" {
+		downloadStep = fmt.Sprintf(`echo "📦 Downloading modules (custom)..."
+%s 2>&1
+echo "✓ Modules downloaded"`, fw.InstallCmd)
+	}
+
+	return fmt.Sprintf(`#!/bin/sh
+set -e
+echo "🏰 [build] Go project"
+
+cd /app
+
+# Copy code to build volume
+cp -r /app/code/. /app/ 2>&1
+echo "✓ Code copied"
+
+%s
 
 echo "🔨 Building..."
 mkdir -p /app/bin
@@ -77,7 +84,7 @@ echo "✓ Binary built ($(du -sh /app/bin/ 2>/dev/null | cut -f1))"
 
 rm -f /app/.openberth-build.sh /app/.openberth-run.sh
 echo "🏰 [build] Complete"
-`, fw.BuildCmd)
+`, downloadStep, fw.BuildCmd)
 }
 
 func (p *GoProvider) RunScript(fw *FrameworkInfo) string {
@@ -103,14 +110,20 @@ func (p *GoProvider) CacheVolumes(userID string) []string {
 func (p *GoProvider) RebuildCopyScript() string { return "" }
 
 func (p *GoProvider) SandboxEntrypoint(fw *FrameworkInfo, port int) string {
-	return `#!/bin/sh
+	downloadStep := `echo "🏰 [sandbox] Downloading Go modules..."
+go mod download 2>&1`
+	if fw.InstallCmd != "" {
+		downloadStep = fmt.Sprintf(`echo "🏰 [sandbox] Downloading Go modules (custom)..."
+%s 2>&1`, fw.InstallCmd)
+	}
+
+	return fmt.Sprintf(`#!/bin/sh
 set -e
 cd /app
 
-echo "🏰 [sandbox] Downloading Go modules..."
-go mod download 2>&1
+%s
 
-echo "🏰 [sandbox] Building..."
+echo "🏰 [sandbox] Building..."`, downloadStep) + `
 mkdir -p /tmp/bin
 go build -o /tmp/bin/server . 2>&1
 

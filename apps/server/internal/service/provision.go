@@ -106,10 +106,10 @@ func (svc *Service) prepareDeployDir(id string, files map[string]string) (string
 // detectFrameworkOrFail detects the framework and returns an error if detection fails.
 // On failure it cleans up codeDir.
 func detectFrameworkOrFail(codeDir string) (*framework.FrameworkInfo, error) {
-	fw := framework.DetectFramework(codeDir)
+	fw := framework.DetectWithOverrides(codeDir)
 	if fw == nil {
 		os.RemoveAll(codeDir)
-		return nil, ErrBadRequest("Could not detect project type. Include package.json (Node), go.mod (Go), requirements.txt (Python), or index.html (static).")
+		return nil, ErrBadRequest("Could not detect project type. Include package.json (Node), go.mod (Go), requirements.txt (Python), or index.html (static). Or add a .berth.json with \"language\" and \"start\" fields.")
 	}
 	return fw, nil
 }
@@ -204,6 +204,7 @@ func (svc *Service) buildAndStart(p buildStartParams) {
 			RunImage:     p.FW.RunImage,
 			BuildCmd:     p.FW.BuildCmd,
 			StartCmd:     p.FW.StartCmd,
+			InstallCmd:   p.FW.InstallCmd,
 			CacheDir:     p.FW.CacheDir,
 			FrameworkEnv: p.FW.Env,
 			UserEnv:      p.EnvVars,
@@ -241,6 +242,7 @@ func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, f
 			RunImage:     fw.RunImage,
 			BuildCmd:     fw.BuildCmd,
 			StartCmd:     fw.StartCmd,
+			InstallCmd:   fw.InstallCmd,
 			CacheDir:     fw.CacheDir,
 			FrameworkEnv: fw.Env,
 			UserEnv:      envVars,
@@ -288,14 +290,15 @@ func (svc *Service) sandboxOwnerGuard(sandboxID string, user *store.User) (*stor
 // fwInfo converts a framework.FrameworkInfo to our internal frameworkInfo.
 func fwInfo(fw *framework.FrameworkInfo) *frameworkInfo {
 	return &frameworkInfo{
-		Framework: fw.Framework,
-		Language:  fw.Language,
-		Image:     fw.Image,
-		RunImage:  fw.RunImage,
-		BuildCmd:  fw.BuildCmd,
-		StartCmd:  fw.StartCmd,
-		CacheDir:  fw.CacheDir,
-		Env:       fw.Env,
+		Framework:  fw.Framework,
+		Language:   fw.Language,
+		Image:      fw.Image,
+		RunImage:   fw.RunImage,
+		BuildCmd:   fw.BuildCmd,
+		StartCmd:   fw.StartCmd,
+		InstallCmd: fw.InstallCmd,
+		CacheDir:   fw.CacheDir,
+		Env:        fw.Env,
 	}
 }
 

@@ -262,6 +262,68 @@ func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, f
 	}()
 }
 
+// ── Update helpers ──────────────────────────────────────────────────
+
+// updateOwnerGuard loads a deployment and verifies it can be updated by this user.
+func (svc *Service) updateOwnerGuard(deployID string, user *store.User) (*store.Deployment, error) {
+	deploy, err := svc.Store.GetDeployment(deployID)
+	if err != nil || deploy == nil {
+		return nil, ErrNotFound("Deployment not found.")
+	}
+	if deploy.UserID != user.ID && user.Role != "admin" {
+		return nil, ErrForbidden("Not your deployment.")
+	}
+	if deploy.Status != "running" && deploy.Status != "failed" {
+		return nil, ErrBadRequest(fmt.Sprintf("Cannot update deployment in '%s' state.", deploy.Status))
+	}
+	if deploy.Locked {
+		return nil, ErrBadRequest("Deployment is locked. Unlock it first.")
+	}
+	return deploy, nil
+}
+
+// detectAndRebuild handles the shared post-code-update logic: framework detection,
+// env merging, settings preservation, and async rebuild.
+func (svc *Service) detectAndRebuild(deploy *store.Deployment, userName string, env map[string]string, port int, memory, cpus, networkQuota, logPrefix string) (*UpdateResult, error) {
+	codeDir := filepath.Join(svc.Cfg.DeploysDir, deploy.ID)
+
+	fw := framework.DetectWithOverrides(codeDir)
+	if fw == nil {
+		return nil, ErrBadRequest("Could not detect framework in updated code. Add a .berth.json with \"language\" and \"start\" fields.")
+	}
+
+	// Merge env: start with existing, override with any new values
+	envVars := map[string]string{}
+	if deploy.EnvJSON != "" && deploy.EnvJSON != "{}" {
+		json.Unmarshal([]byte(deploy.EnvJSON), &envVars)
+	}
+	for k, v := range env {
+		envVars[k] = v
+	}
+
+	resolvedPort := resolvePort(port, fw.Port)
+	memory = coalesce(memory, deploy.Memory)
+	cpus = coalesce(cpus, deploy.CPUs)
+	quota := deploy.NetworkQuota
+	if networkQuota != "" {
+		quota = networkQuota
+	}
+
+	if b, err := json.Marshal(envVars); err == nil {
+		svc.Store.UpdateDeploymentEnvJSON(deploy.ID, string(b))
+	}
+	svc.Store.UpdateDeploymentStatus(deploy.ID, "updating")
+
+	svc.rebuildAndStart(deploy, userName, fwInfo(fw), resolvedPort, envVars, memory, cpus, quota, logPrefix)
+
+	return &UpdateResult{
+		ID:      deploy.ID,
+		Status:  "updating",
+		URL:     svc.deployURL(deploy.Subdomain),
+		Message: "Code updated. Rebuilding...",
+	}, nil
+}
+
 // ── Sandbox owner guard ─────────────────────────────────────────────
 
 // sandboxOwnerGuard loads a sandbox deployment and verifies ownership and status.

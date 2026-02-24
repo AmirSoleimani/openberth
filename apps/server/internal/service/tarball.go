@@ -198,7 +198,7 @@ func (svc *Service) UpdateTarball(user *store.User, p TarballUpdateParams) (*Upd
 	if deploy.UserID != user.ID && user.Role != "admin" {
 		return nil, ErrForbidden("Not your deployment.")
 	}
-	if deploy.Status != "running" {
+	if deploy.Status != "running" && deploy.Status != "failed" {
 		return nil, ErrBadRequest(fmt.Sprintf("Cannot update deployment in '%s' state.", deploy.Status))
 	}
 	if deploy.Locked {

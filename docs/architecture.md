@@ -72,7 +72,7 @@ Three binaries, all pure Go (`CGO_ENABLED=0`), fully static:
 | Binary | Size | Description |
 |--------|------|-------------|
 | `berth-server` | ~15 MB | Main daemon (includes embedded SQLite engine, gallery UI, and self-installer) |
-| `openberth` (CLI) | ~8 MB | Client CLI, zero dependencies |
+| `berth` (CLI) | ~8 MB | Client CLI, zero dependencies |
 | `berth-mcp` | ~8 MB | Standalone MCP server for Claude Desktop / Cursor |
 
 The server binary includes a built-in `install` subcommand (`berth-server install --domain example.com`) that provisions the host machine — no separate installer binary needed.
@@ -316,7 +316,7 @@ The CLI scaffolds complete Vite projects from single `.jsx`, `.tsx`, `.vue`, `.s
 ## Deployment Lifecycle
 
 ```
-CLI: openberth deploy [file|dir] [--port --memory --cpus --env --env-file --protect --network-quota]
+CLI: berth deploy [file|dir] [--port --memory --cpus --env --env-file --protect --network-quota]
   |
   +- Scaffold temp Vite project (if single file)
   +- Auto-load .env from project dir

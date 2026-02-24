@@ -118,15 +118,15 @@ Download the CLI binary for your platform from [Releases](https://github.com/ope
 
 | Platform | Binary |
 |----------|--------|
-| macOS (Apple Silicon) | `openberth-darwin-arm64` |
-| macOS (Intel) | `openberth-darwin-amd64` |
-| Linux (x86_64) | `openberth-linux-amd64` |
-| Linux (ARM64) | `openberth-linux-arm64` |
-| Windows | `openberth-windows-amd64.exe` |
+| macOS (Apple Silicon) | `berth-darwin-arm64` |
+| macOS (Intel) | `berth-darwin-amd64` |
+| Linux (x86_64) | `berth-linux-amd64` |
+| Linux (ARM64) | `berth-linux-arm64` |
+| Windows | `berth-windows-amd64.exe` |
 
 ```bash
-chmod +x openberth-darwin-arm64
-sudo mv openberth-darwin-arm64 /usr/local/bin/openberth
+chmod +x berth-darwin-arm64
+sudo mv berth-darwin-arm64 /usr/local/bin/berth
 ```
 
 Or build from source: `make cli` (requires Go 1.24+).
@@ -134,16 +134,16 @@ Or build from source: `make cli` (requires Go 1.24+).
 Configure it to talk to your server:
 
 ```bash
-openberth config set server https://openberth.example.com   # or http:// for --insecure mode
-openberth config set key sc_your_admin_key_here
+berth config set server https://openberth.example.com   # or http:// for --insecure mode
+berth config set key sc_your_admin_key_here
 ```
 
 ## Verify
 
 ```bash
-openberth version
+berth version
 # Should show CLI version, server version, and domain
 
-openberth deploy ./examples/jsxapp
+berth deploy ./examples/jsxapp
 # Should return a live HTTPS URL
 ```

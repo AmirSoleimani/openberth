@@ -176,7 +176,15 @@ func (svc *Service) UpdateCode(user *store.User, p CodeUpdateParams) (*UpdateRes
 		return nil, ErrBadRequest("Could not detect framework in updated code. Add a .berth.json with \"language\" and \"start\" fields.")
 	}
 
-	envVars := ensureEnv(p.Env)
+	// Merge env: start with existing, override with any new values
+	envVars := map[string]string{}
+	if deploy.EnvJSON != "" && deploy.EnvJSON != "{}" {
+		json.Unmarshal([]byte(deploy.EnvJSON), &envVars)
+	}
+	for k, v := range p.Env {
+		envVars[k] = v
+	}
+
 	port := resolvePort(p.Port, fw.Port)
 
 	// Preserve existing deployment settings unless explicitly overridden
@@ -187,10 +195,8 @@ func (svc *Service) UpdateCode(user *store.User, p CodeUpdateParams) (*UpdateRes
 		quota = p.NetworkQuota
 	}
 
-	if len(envVars) > 0 {
-		if b, err := json.Marshal(envVars); err == nil {
-			svc.Store.UpdateDeploymentEnvJSON(deploy.ID, string(b))
-		}
+	if b, err := json.Marshal(envVars); err == nil {
+		svc.Store.UpdateDeploymentEnvJSON(deploy.ID, string(b))
 	}
 	svc.Store.UpdateDeploymentStatus(deploy.ID, "updating")
 

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/openberth/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
 )
 
 // Handlers holds HTTP handler methods. All handlers share the service layer.

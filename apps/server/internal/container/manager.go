@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openberth/openberth/apps/server/internal/config"
-	"github.com/openberth/openberth/apps/server/internal/framework"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/config"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/framework"
 )
 
 type ContainerManager struct {

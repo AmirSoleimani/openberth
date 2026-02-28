@@ -22,7 +22,7 @@ A     *.openberth.example.com     → your-server-ip
 
 ### 2. Install the server
 
-Download the server binary from [Releases](https://github.com/openberth/openberth/releases), then copy it to a fresh Ubuntu 22.04/24.04 VM:
+Download the server binary from [Releases](https://github.com/AmirSoleimani/openberth/releases), then copy it to a fresh Ubuntu 22.04/24.04 VM:
 
 ```bash
 scp berth-server-linux-amd64 root@your-server:/tmp/berth-server
@@ -36,7 +36,7 @@ Done in ~2 minutes. The installer sets up Docker, gVisor, Caddy, SQLite, and sys
 
 ### 3. Install the CLI
 
-Download the CLI for your platform from [Releases](https://github.com/openberth/openberth/releases):
+Download the CLI for your platform from [Releases](https://github.com/AmirSoleimani/openberth/releases):
 
 | Platform | Binary |
 |----------|--------|

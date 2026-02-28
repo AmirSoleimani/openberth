@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/openberth/openberth/apps/server/internal/service"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // allowedSettings is the set of settings keys that can be modified via the admin API.

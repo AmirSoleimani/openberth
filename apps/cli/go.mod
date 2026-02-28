@@ -1,4 +1,4 @@
-module github.com/openberth/openberth/apps/cli
+module github.com/AmirSoleimani/openberth/apps/cli
 
 go 1.25.0
 

@@ -130,7 +130,7 @@ The standalone MCP server lets AI assistants deploy via native tool calls over s
 
 ### Install
 
-Download `berth-mcp-{os}-{arch}` from [Releases](https://github.com/openberth/openberth/releases/latest):
+Download `berth-mcp-{os}-{arch}` from [Releases](https://github.com/AmirSoleimani/openberth/releases/latest):
 
 ```bash
 chmod +x berth-mcp-darwin-arm64

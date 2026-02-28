@@ -21,7 +21,7 @@ examples/      Example projects (Next.js, Go, Python, JSX, static)
 2. Clone and build:
 
 ```bash
-git clone https://github.com/openberth/openberth.git
+git clone https://github.com/AmirSoleimani/openberth.git
 cd openberth
 make build
 ```

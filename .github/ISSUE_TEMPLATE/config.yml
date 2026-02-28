@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/openberth/openberth/tree/main/docs
+    url: https://github.com/AmirSoleimani/openberth/tree/main/docs
     about: Check the docs before opening an issue.

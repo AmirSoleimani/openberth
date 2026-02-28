@@ -1,11 +1,11 @@
 package service
 
 import (
-	"github.com/openberth/openberth/apps/server/internal/config"
-	"github.com/openberth/openberth/apps/server/internal/container"
-	"github.com/openberth/openberth/apps/server/internal/datastore"
-	"github.com/openberth/openberth/apps/server/internal/proxy"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/config"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/container"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/datastore"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/proxy"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // BandwidthManager is implemented by the bandwidth tracker in the main package.

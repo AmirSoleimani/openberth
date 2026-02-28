@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/openberth/openberth/apps/server/internal/service"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // MCPHandler implements the MCP Streamable HTTP transport for Claude UI.

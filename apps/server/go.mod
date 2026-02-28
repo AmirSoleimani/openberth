@@ -1,4 +1,4 @@
-module github.com/openberth/openberth/apps/server
+module github.com/AmirSoleimani/openberth/apps/server
 
 go 1.25.0
 

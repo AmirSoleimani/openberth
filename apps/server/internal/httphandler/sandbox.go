@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/openberth/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
 )
 
 func (h *Handlers) SandboxCreate(w http.ResponseWriter, r *http.Request) {

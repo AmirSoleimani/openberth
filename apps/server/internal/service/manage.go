@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openberth/openberth/apps/server/internal/proxy"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/proxy"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // ── Parameter/Result types ──────────────────────────────────────────

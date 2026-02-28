@@ -388,7 +388,7 @@ There are no automated tests yet. Verify changes by:
 ## File Paths on Server
 
 - Config: `/var/lib/openberth/config.json`
-- Database: `/var/lib/openberth/openberth.db`
+- Database: `/var/lib/AmirSoleimani/openberth.db`
 - Deploy source: `/var/lib/openberth/deploys/{id}/`
 - Persistent data: `/var/lib/openberth/persist/{id}/`
 - Caddy sites: `/etc/caddy/sites/{subdomain}.caddy`

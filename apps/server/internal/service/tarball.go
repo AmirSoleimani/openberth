@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/openberth/openberth/apps/server/internal/container"
-	"github.com/openberth/openberth/apps/server/internal/framework"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/container"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/framework"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // ExtractTarball extracts a gzipped tar archive into destDir.

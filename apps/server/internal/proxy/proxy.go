@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/openberth/openberth/apps/server/internal/config"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/config"
 )
 
 type AccessControl struct {

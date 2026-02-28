@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/openberth/openberth/apps/server/internal/service"
-	"github.com/openberth/openberth/apps/server/internal/store"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // ── Redirect validation ──────────────────────────────────────────

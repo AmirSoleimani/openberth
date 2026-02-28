@@ -41,11 +41,11 @@ All deployment URLs will use `http://` instead of `https://`. This mode is mutua
 
 ### Automated Install (Recommended)
 
-The server binary includes a built-in `install` subcommand that provisions the host machine. Download it from [Releases](https://github.com/openberth/openberth/releases), copy it to a fresh Ubuntu server, and run it.
+The server binary includes a built-in `install` subcommand that provisions the host machine. Download it from [Releases](https://github.com/AmirSoleimani/openberth/releases), copy it to a fresh Ubuntu server, and run it.
 
 **1. Download the server binary:**
 
-Download `berth-server-linux-amd64` (or `arm64`) from the [latest release](https://github.com/openberth/openberth/releases/latest).
+Download `berth-server-linux-amd64` (or `arm64`) from the [latest release](https://github.com/AmirSoleimani/openberth/releases/latest).
 
 Or build from source: `make server GOOS=linux GOARCH=amd64`
 
@@ -114,7 +114,7 @@ If you prefer to provision manually:
 
 ## Install the CLI
 
-Download the CLI binary for your platform from [Releases](https://github.com/openberth/openberth/releases/latest):
+Download the CLI binary for your platform from [Releases](https://github.com/AmirSoleimani/openberth/releases/latest):
 
 | Platform | Binary |
 |----------|--------|

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openberth/openberth/apps/server/internal/framework"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/framework"
 )
 
 // SanitizeName cleans a user-provided name for use as a subdomain component.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ── HTTP helpers ────────────────────────────────────────────────────
@@ -119,18 +120,78 @@ func errorResult(text string) *ToolResult {
 
 // ── Tarball creation ────────────────────────────────────────────────
 
-// createTarball creates a .tar.gz from a directory, skipping common junk.
+var defaultIgnores = []string{
+	"node_modules/",
+	".git/",
+	".next/",
+	".nuxt/",
+	".output/",
+	"dist/",
+	"build/",
+	".cache/",
+	"venv/",
+	"__pycache__/",
+	".env.local",
+	".openberth-entry.sh",
+	".openberth-sandbox.sh",
+}
+
+// loadIgnorePatterns reads .gitignore and .berthignore from dir and merges
+// them with defaultIgnores.
+func loadIgnorePatterns(dir string) []string {
+	patterns := append([]string{}, defaultIgnores...)
+	for _, name := range []string{".gitignore", ".berthignore"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					patterns = append(patterns, line)
+				}
+			}
+		}
+	}
+	return patterns
+}
+
+// shouldIgnore checks whether a relative path should be ignored according to patterns.
+// Returns (ignored, skipDir) — skipDir is true when a directory itself should be skipped entirely.
+func shouldIgnore(relPath string, isDir bool, patterns []string) (bool, bool) {
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+
+		// Directory pattern (ends with /)
+		if strings.HasSuffix(pattern, "/") {
+			dirName := strings.TrimSuffix(pattern, "/")
+			if isDir && (relPath == dirName || strings.HasPrefix(relPath, dirName+"/")) {
+				return true, true
+			}
+			if !isDir && strings.Contains(relPath, dirName+"/") {
+				return true, false
+			}
+			continue
+		}
+
+		// Exact match or glob-like match
+		matched, _ := filepath.Match(pattern, filepath.Base(relPath))
+		if matched || relPath == pattern || strings.HasPrefix(relPath, pattern+"/") {
+			return true, isDir
+		}
+	}
+	return false, false
+}
+
+// createTarball creates a .tar.gz from a directory, respecting .gitignore and .berthignore.
 func createTarball(srcDir string, dest *os.File) (int, error) {
+	patterns := loadIgnorePatterns(srcDir)
+
 	gw := gzip.NewWriter(dest)
 	defer gw.Close()
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
-
-	skipDirs := map[string]bool{
-		"node_modules": true, ".git": true, ".next": true, "dist": true,
-		"build": true, "__pycache__": true, ".venv": true, "venv": true,
-		"target": true, "vendor": true,
-	}
 
 	count := 0
 	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
@@ -143,12 +204,16 @@ func createTarball(srcDir string, dest *os.File) (int, error) {
 			return nil
 		}
 
-		// Skip junk directories
-		if info.IsDir() && skipDirs[info.Name()] {
-			return filepath.SkipDir
-		}
-		if info.IsDir() {
+		ignored, skipDir := shouldIgnore(rel, info.IsDir(), patterns)
+		if ignored {
+			if skipDir {
+				return filepath.SkipDir
+			}
 			return nil
+		}
+
+		if info.IsDir() {
+			return nil // we only add files
 		}
 
 		// Skip large files (>10MB)

@@ -135,7 +135,7 @@ ON CONFLICT(name) DO UPDATE SET api_key=excluded.api_key, password_hash=excluded
 
 const adminScriptTemplate = `#!/usr/bin/env bash
 set -euo pipefail
-DB="/var/lib/AmirSoleimani/openberth.db"
+DB="/var/lib/openberth/openberth.db"
 
 case "${1:-help}" in
     user)

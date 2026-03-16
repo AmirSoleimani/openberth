@@ -251,15 +251,32 @@ func cmdDeploy() {
 			url, _ := result["url"].(string)
 			msg, _ := result["message"].(string)
 			ok(msg)
-			fmt.Println()
-			fmt.Printf("  %s⚡%s %s%s%s\n", cGreen, cReset, cCyan, url, cReset)
-			warn("Building — may take a few minutes to become accessible.")
-			fmt.Println()
 
 			// Update URL in project config
 			if url != "" {
 				pCfg.URL = url
 				saveProjectConfig(projectDir, pCfg)
+			}
+
+			if !hasFlag("no-wait") {
+				fmt.Println()
+				status := waitForBuild(client, pCfg.DeploymentID)
+				switch status {
+				case "running":
+					deploySuccess(url)
+				case "failed":
+					fail("Build failed. Run: berth logs " + pCfg.DeploymentID)
+					os.Exit(1)
+				default:
+					warn("Build still in progress.")
+					info(fmt.Sprintf("Status: %sberth status %s%s", cDim, pCfg.DeploymentID, cReset))
+					fmt.Println()
+				}
+			} else {
+				fmt.Println()
+				fmt.Printf("  %s⚡%s %s%s%s\n", cGreen, cReset, cCyan, url, cReset)
+				warn("Building — may take a few minutes to become accessible.")
+				fmt.Println()
 			}
 			return
 		}
@@ -323,9 +340,8 @@ func cmdDeploy() {
 	expiresAt, _ := result["expiresAt"].(string)
 
 	ok(fmt.Sprintf("Framework: %s%s%s", cBold, fw, cReset))
-	fmt.Println()
-	fmt.Printf("  %s⚡%s %sLive at:%s %s%s%s\n", cGreen, cReset, cBold, cReset, cCyan, url, cReset)
-	fmt.Println()
+	fmt.Printf("  %s›%s URL: %s%s%s\n", cCyan, cReset, cCyan, url, cReset)
+	info("ID: " + id)
 
 	if expiresAt != "" {
 		info("Expires: " + expiresAt)
@@ -336,12 +352,30 @@ func cmdDeploy() {
 	if ak, _ := result["apiKey"].(string); ak != "" {
 		fmt.Printf("  %sAPI Key:%s %s%s%s\n", cBold, cReset, cCyan, ak, cReset)
 	}
-	info("ID: " + id)
-	warn("Building — may take a few minutes to become accessible.")
-	info(fmt.Sprintf("Status: %sberth status %s%s", cDim, id, cReset))
-	info(fmt.Sprintf("Logs: %sberth logs %s%s", cDim, id, cReset))
-	info(fmt.Sprintf("Destroy: %sberth destroy %s%s", cDim, id, cReset))
-	fmt.Println()
+
+	if !hasFlag("no-wait") {
+		fmt.Println()
+		status := waitForBuild(client, id)
+		switch status {
+		case "running":
+			deploySuccess(url)
+		case "failed":
+			fail("Build failed. Run: berth logs " + id)
+			os.Exit(1)
+		default:
+			warn("Build still in progress.")
+			info(fmt.Sprintf("Status: %sberth status %s%s", cDim, id, cReset))
+			info(fmt.Sprintf("Logs: %sberth logs %s%s", cDim, id, cReset))
+			fmt.Println()
+		}
+	} else {
+		fmt.Println()
+		warn("Building — may take a few minutes to become accessible.")
+		info(fmt.Sprintf("Status: %sberth status %s%s", cDim, id, cReset))
+		info(fmt.Sprintf("Logs: %sberth logs %s%s", cDim, id, cReset))
+		info(fmt.Sprintf("Destroy: %sberth destroy %s%s", cDim, id, cReset))
+		fmt.Println()
+	}
 
 	// Write back to project config
 	pCfg.DeploymentID = id
@@ -521,43 +555,24 @@ func cmdPromote() {
 	fmt.Println()
 	info("Building production deployment...")
 
-	// Poll for build completion
-	spin("Building")
-	for i := 0; i < 180; i++ { // up to 6 minutes
-		time.Sleep(2 * time.Second)
-		status, err := client.Request("GET", "/api/deployments/"+resultID)
-		if err != nil {
-			continue
-		}
-		containerStatus, _ := status["containerStatus"].(string)
-		if containerStatus == "running" {
-			done()
-			fmt.Println()
-			fmt.Printf("  %s⚡%s %sLive at:%s %s%s%s\n", cGreen, cReset, cBold, cReset, cCyan, url, cReset)
-			fmt.Println()
-			info("ID: " + resultID)
-			info(fmt.Sprintf("Logs: %sberth logs %s%s", cDim, resultID, cReset))
-			fmt.Println()
-
-			// Update project config: set deployment ID, clear sandbox ID
-			pCfg := loadProjectConfig(projectDir)
-			pCfg.DeploymentID = resultID
-			pCfg.URL = url
-			pCfg.SandboxID = ""
-			saveProjectConfig(projectDir, pCfg)
-			return
-		}
-		if containerStatus == "failed" {
-			done()
-			fail("Build failed. Run: berth logs " + resultID)
-			os.Exit(1)
-		}
+	status := waitForBuild(client, resultID)
+	switch status {
+	case "running":
+		deploySuccess(url)
+		// Update project config: set deployment ID, clear sandbox ID
+		pCfg := loadProjectConfig(projectDir)
+		pCfg.DeploymentID = resultID
+		pCfg.URL = url
+		pCfg.SandboxID = ""
+		saveProjectConfig(projectDir, pCfg)
+	case "failed":
+		fail("Build failed. Run: berth logs " + resultID)
+		os.Exit(1)
+	default:
+		warn("Build still in progress.")
+		info(fmt.Sprintf("Status: %sberth status %s%s", cDim, resultID, cReset))
+		fmt.Println()
 	}
-	done()
-	fmt.Println()
-	info("Build still in progress. Check status with:")
-	info(fmt.Sprintf("  %sberth status %s%s", cDim, resultID, cReset))
-	fmt.Println()
 }
 
 func cmdUpdate() {
@@ -1252,6 +1267,41 @@ func openBrowser(url string) error {
 	default:
 		return fmt.Errorf("unsupported platform")
 	}
+}
+
+// ── Build wait ──────────────────────────────────────────────────────
+
+// waitForBuild polls deployment status until running, failed, or timeout.
+// Returns the final containerStatus string.
+func waitForBuild(client *APIClient, id string) string {
+	spin("Building")
+	for i := 0; i < 180; i++ { // up to 6 minutes
+		time.Sleep(2 * time.Second)
+		status, err := client.Request("GET", "/api/deployments/"+id)
+		if err != nil {
+			continue
+		}
+		cs, _ := status["containerStatus"].(string)
+		if cs == "running" || cs == "failed" {
+			done()
+			return cs
+		}
+	}
+	done()
+	return "timeout"
+}
+
+// deploySuccess handles the post-build success output: URL, QR, browser open.
+func deploySuccess(url string) {
+	fmt.Println()
+	fmt.Printf("  %s✅%s %sLive at%s %s%s%s\n", cGreen, cReset, cBold, cReset, cCyan, url, cReset)
+
+	if !hasFlag("no-qr") && isTerminal() {
+		printQR(url)
+	}
+
+	fmt.Println()
+	openBrowser(url)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

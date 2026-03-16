@@ -93,6 +93,8 @@ func printHelp() {
     --users <user,...>  Restrict access to specific users (for user mode)
     --network-quota <q> Network transfer quota (e.g. 1g, 5g, 10g)
     --new               Force new deployment (ignore existing ID in config)
+    --no-wait           Skip waiting for build (print URL and exit)
+    --no-qr             Suppress QR code display
 
   %sDEV OPTIONS%s
     --attach <id>       Reattach file watcher to an existing sandbox

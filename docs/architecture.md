@@ -296,6 +296,14 @@ Memory and CPU are configurable per deployment on both `deploy` and `update`.
 
 The CLI scaffolds deployable projects from single `.jsx`, `.tsx`, `.vue`, `.svelte`, `.html`, `.md`, or `.ipynb` files. For JS frameworks, the scaffolder parses imports to detect dependencies, detects Tailwind from class names, and produces a Vite project. Markdown and notebook files are rendered as self-contained static `index.html` files (markdown via marked.js CDN, notebooks with styled code/output cells). By the time the tarball reaches the server, it looks like any other project.
 
+## Secrets Store
+
+User-scoped (or admin-global) encrypted secrets stored server-side. Uses AES-256-GCM envelope encryption: master key (auto-generated, stored in `config.json`) wraps per-secret data encryption keys. Secret values are never stored in `env_json` — they're resolved just-in-time at container creation. When a secret is rotated, affected deployments are restarted via `RecreateRuntime` (runtime-only, no rebuild, ~5s). MCP tools expose `berth_secret_list` with descriptions for AI discoverability.
+
+## Log Streaming
+
+`GET /api/deployments/{id}/logs/stream` provides real-time logs via Server-Sent Events (SSE). The server spawns `docker logs --follow` as a subprocess and pipes lines as `data:` events. The process is killed when the client disconnects. CLI: `berth logs --follow` / `-f`.
+
 ## File Layout on Server
 
 ```
@@ -303,8 +311,8 @@ The CLI scaffolds deployable projects from single `.jsx`, `.tsx`, `.vue`, `.svel
   berth-server           Single Go binary (daemon)
   berth-admin            Admin helper script
 /var/lib/openberth/
-  openberth.db               SQLite (users + deployments)
-  config.json                 Server config
+  openberth.db               SQLite (users + deployments + secrets)
+  config.json                 Server config (includes masterKey for encryption)
   deploys/<id>/               Extracted project code per deployment
   persist/<id>/               Persistent data directory per deployment
   persist/<id>/store.db       SQLite document store (/_data API)
@@ -316,13 +324,14 @@ The CLI scaffolds deployable projects from single `.jsx`, `.tsx`, `.vue`, `.svel
 ## Deployment Lifecycle
 
 ```
-CLI: berth deploy [file|dir] [--port --memory --cpus --env --env-file --protect --network-quota]
+CLI: berth deploy [file|dir] [--port --memory --cpus --env --env-file --secret --protect --network-quota]
   |
   +- Scaffold temp Vite project (if single file)
   +- Auto-load .env from project dir
   +- Load --env-file (if specified)
   +- Create tarball (respects .gitignore)
-  +- Upload to POST /api/deploy with env + port + memory + cpus + protect + quota
+  +- Upload to POST /api/deploy with env + secrets + port + memory + cpus + protect + quota
+  +- Save deploy params to .berth.json (name, ttl, memory, port, protect, secrets, etc.)
   |
 Server:
   +- Extract tarball

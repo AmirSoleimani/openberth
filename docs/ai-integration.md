@@ -105,10 +105,21 @@ curl -X PATCH https://openberth.example.com/api/deployments/abc123 \
 ```
 GET  /api/deployments              List all deployments
 GET  /api/deployments/{id}         Deployment status
-GET  /api/deployments/{id}/logs    Container logs
+GET  /api/deployments/{id}/logs    Container logs (?tail=N)
+GET  /api/deployments/{id}/logs/stream  Stream logs via SSE (real-time)
 PATCH /api/deployments/{id}        Update metadata (network quota)
 DELETE /api/deployments/{id}       Destroy deployment
 ```
+
+### Secrets endpoints
+
+```
+POST /api/secrets                  Set a secret (JSON: name, value, description, global)
+GET  /api/secrets                  List secrets (names + descriptions, never values)
+DELETE /api/secrets/{name}         Delete a secret (?global=true for global)
+```
+
+Deploy, update, and sandbox endpoints accept a `secrets` parameter (JSON array of secret names). Secret values are resolved server-side and injected as env vars at container start.
 
 ### Sandbox endpoints
 
@@ -122,7 +133,7 @@ POST /api/sandbox/{id}/promote     Promote to production deployment
 DELETE /api/sandbox/{id}           Destroy sandbox
 ```
 
-Sandbox create accepts the same `protect_mode`, `protect_username`, `protect_password`, `protect_api_key`, `protect_users`, and `network_quota` fields as deploy.
+Sandbox create accepts the same `protect_mode`, `protect_username`, `protect_password`, `protect_api_key`, `protect_users`, `network_quota`, and `secrets` fields as deploy.
 
 ## 2. MCP Server (Claude Desktop / Cursor)
 

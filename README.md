@@ -70,6 +70,12 @@ berth deploy --env-file .env.prod         # env vars from file
 berth deploy --protect api_key            # deploy with access protection
 berth deploy --network-quota 5g           # network transfer quota
 
+# Secrets (encrypted, reusable across deployments)
+berth secret set STRIPE_KEY sk_live_abc --description "Stripe API key"
+berth secret list                         # names + descriptions (never values)
+berth secret delete OLD_KEY
+berth deploy --secret STRIPE_KEY          # reference by name
+
 # Dev mode (live sync + hot reload)
 berth dev                                 # start a sandbox
 berth dev App.jsx                         # single file with hot reload
@@ -84,8 +90,10 @@ berth update <id> --env-file .env.prod    # update env vars
 berth list                                # all deployments
 berth status <id>                         # deployment details
 berth logs <id>                           # container logs
+berth logs <id> --follow                  # stream logs in real time
 berth destroy <id>                        # remove deployment
 berth pull <id> --output ./backup         # download source
+berth upgrade                             # update CLI to latest version
 
 # Access control
 berth protect <id> --mode basic_auth --username admin --password secret

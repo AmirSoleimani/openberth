@@ -147,3 +147,17 @@ berth version
 berth deploy ./examples/jsxapp
 # Should return a live HTTPS URL
 ```
+
+## Upgrading
+
+```bash
+# Upgrade the CLI
+berth upgrade
+berth upgrade --check              # check without installing
+
+# Upgrade the server (on the server machine)
+sudo berth-server upgrade
+sudo berth-server upgrade --check  # check without installing
+```
+
+Both commands download the latest release from GitHub and replace the binary in place. The server additionally restarts the systemd service automatically. You can pin a specific version with `--version v1.5.0`.

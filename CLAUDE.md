@@ -84,7 +84,10 @@ When adding a tool: add definition + handler to **both**. Tool descriptions are 
 Two-phase: build (unconstrained memory, gVisor) → runtime (512MB/0.5 CPU, gVisor). Blue-green updates with rollback on failure. Sandbox mode: single container with dev server + HMR.
 
 ### `.berth.json` dual purpose
-CLI reads client-side fields (`name`, `ttl`, `memory`, `port`). Server reads override fields (`language`, `build`, `start`, `install`, `dev`). Both coexist in same file.
+CLI reads and writes client-side fields (`name`, `ttl`, `memory`, `port`, `protect`, `networkQuota`, `secrets`, `deploymentId`, `url`). Server reads override fields (`language`, `build`, `start`, `install`, `dev`). Both coexist in same file. Deploy parameters passed via flags are auto-persisted to `.berth.json` for subsequent deploys.
+
+### Secrets store
+Encrypted secrets (AES-256-GCM envelope encryption) stored server-side. Master key auto-generated on first server start, saved in `config.json`. User-scoped or global (admin-only). Referenced by name at deploy time (`--secret NAME`), resolved JIT at container creation. Secret values never stored in `env_json`. Rotating a secret auto-restarts affected deployments via `RecreateRuntime` (runtime-only restart, ~5s, no rebuild). MCP tools: `berth_secret_set`, `berth_secret_list` (returns names + descriptions for AI discoverability), `berth_secret_delete`.
 
 ### Auth chain
 API key (`sc_` prefix) → OAuth token → Session cookie (`openberth_session`) → unauthenticated (nil)

@@ -172,6 +172,43 @@ berth pull <id> --output ./backup      # Download to specific directory
 berth pull                             # Uses deployment ID from .berth.json
 ```
 
+## Secrets
+
+Encrypted secrets stored server-side, reusable across deployments. Values are encrypted at rest (AES-256-GCM envelope encryption) and never returned by the API.
+
+```bash
+# Store secrets (encrypted, with optional description for discoverability)
+berth secret set STRIPE_KEY sk_live_abc --description "Stripe production API key"
+berth secret set DATABASE_URL postgres://... --description "Main database"
+
+# List secrets (names + descriptions only, never values)
+berth secret list
+
+# Reference in deployments (value resolved server-side)
+berth deploy --secret STRIPE_KEY --secret DATABASE_URL
+berth dev --secret DATABASE_URL
+
+# Mix with explicit env (--env overrides same-named secret)
+berth deploy --secret STRIPE_KEY --env STRIPE_KEY=sk_test_override
+
+# Rotate — update value, affected deployments auto-restart (~5s)
+berth secret set STRIPE_KEY sk_live_new456
+
+# Global secrets (admin only, available to all users)
+berth secret set SHARED_DB postgres://... --global --description "Shared database"
+
+# Delete
+berth secret delete OLD_KEY
+berth secret delete SHARED_DB --global
+```
+
+Secrets can also be persisted in `.berth.json`:
+```json
+{ "name": "myapp", "secrets": ["STRIPE_KEY", "DATABASE_URL"] }
+```
+
+Resolution priority: explicit `--env` > user secret > global secret.
+
 ## Other Commands
 
 ```bash
@@ -179,24 +216,39 @@ berth list                  # List all deployments (locked = protected)
 berth status <id>           # Deployment details + access mode
 berth logs <id>             # Container logs
 berth logs <id> --tail 50   # Last 50 lines
+berth logs <id> --follow    # Stream logs in real time (SSE)
+berth logs <id> -f          # Short form
 berth destroy <id>          # Remove a deployment
 berth destroy --all         # Remove all deployments
+berth upgrade               # Update CLI to latest version
+berth upgrade --check       # Check for updates without installing
 berth version               # Show CLI + server version
 berth login                 # Login via browser (sets up API key)
 berth config set <k> <v>    # Configure CLI
 berth config show           # Show config
 ```
 
-## Environment Variables
-
-Three layers, last wins:
+## Server Upgrade
 
 ```bash
-# 1. Auto-loaded: .env in project dir (loaded automatically if present)
-# 2. --env-file: explicit file
-# 3. --env: individual overrides (highest priority)
+sudo berth-server upgrade             # Update to latest release
+sudo berth-server upgrade --check     # Check available version
+sudo berth-server upgrade --version v1.5.0  # Pin specific version
+```
 
-berth deploy --env-file .env.prod --env SECRET_KEY=override
+The server downloads the new binary from GitHub releases, replaces itself, and restarts the systemd service automatically.
+
+## Environment Variables
+
+Four layers, last wins:
+
+```bash
+# 1. Secrets: berth secret set KEY val (encrypted, reusable)
+# 2. Auto-loaded: .env in project dir (loaded automatically if present)
+# 3. --env-file: explicit file
+# 4. --env: individual overrides (highest priority, overrides secrets too)
+
+berth deploy --secret STRIPE_KEY --env-file .env.prod --env DEBUG=true
 ```
 
 The `.env` parser handles comments (`#`), empty lines, `export` prefix, and quoted values. The `PORT` env var is always set automatically to match the app's listen port.

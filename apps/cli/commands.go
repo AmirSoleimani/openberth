@@ -388,9 +388,30 @@ func cmdDeploy() {
 		fmt.Println()
 	}
 
-	// Write back to project config
+	// Write back to project config — persist deploy parameters for next deploy
 	pCfg.DeploymentID = id
 	pCfg.URL = url
+	if name != "" {
+		pCfg.Name = name
+	}
+	if ttl != "" {
+		pCfg.TTL = ttl
+	}
+	if memory != "" {
+		pCfg.Memory = memory
+	}
+	if port != "" {
+		pCfg.Port = port
+	}
+	if protectMode != "" {
+		pCfg.Protect = protectMode
+	}
+	if networkQuota != "" {
+		pCfg.NetworkQuota = networkQuota
+	}
+	if len(secrets) > 0 {
+		pCfg.Secrets = secrets
+	}
 	saveProjectConfig(projectDir, pCfg)
 }
 

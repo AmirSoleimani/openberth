@@ -24,6 +24,8 @@ type ProjectConfig struct {
 	DeploymentID string   `json:"deploymentId,omitempty"`
 	URL          string   `json:"url,omitempty"`
 	SandboxID    string   `json:"sandboxId,omitempty"`
+	BerthVersion  string `json:"berthVersion,omitempty"`
+	ServerVersion string `json:"serverVersion,omitempty"`
 }
 
 func projectConfigPath(dir string) string {

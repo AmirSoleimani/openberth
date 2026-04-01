@@ -412,6 +412,13 @@ func cmdDeploy() {
 	if len(secrets) > 0 {
 		pCfg.Secrets = secrets
 	}
+	pCfg.BerthVersion = version
+	// Fetch server version from /health endpoint
+	if health, err := client.Request("GET", "/health"); err == nil {
+		if sv, ok := health["version"].(string); ok {
+			pCfg.ServerVersion = sv
+		}
+	}
 	saveProjectConfig(projectDir, pCfg)
 }
 

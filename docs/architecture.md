@@ -37,8 +37,8 @@ apps/
     internal/
       config/          Configuration loading (Insecure, CloudflareProxy, BaseURL)
       store/           SQLite persistence (users, deployments, OAuth)
-      container/       Docker/gVisor container lifecycle
-      proxy/           Caddy reverse proxy management (protocol-aware)
+      container/       Container lifecycle (Docker/gVisor or Kubernetes)
+      proxy/           Reverse proxy management (Caddy or built-in K8s proxy)
       framework/       Language/framework detection (Go, Python, Node, Static)
       datastore/       Per-deployment document store
       install/         Self-installer (local provisioning, --insecure/--cloudflare modes)
@@ -261,6 +261,10 @@ On top of gVisor:
 
 ## Infrastructure Stack
 
+OpenBerth supports two backends, selected via the `backend` config field:
+
+### Docker Backend (default)
+
 **Caddy** handles TLS and reverse proxying. Three modes:
 
 | Mode | Config flag | Caddy behavior | Deployment URLs |
@@ -269,11 +273,27 @@ On top of gVisor:
 | **Cloudflare** | `cloudflareProxy: true` | `tls internal` (self-signed), Cloudflare handles public TLS (SSL mode "Full") | `https://` |
 | **Insecure** | `insecure: true` | `auto_https off`, HTTP only | `http://` |
 
-Each deployment gets a `.caddy` file in `/etc/caddy/sites/` mapping a subdomain to a localhost port. In insecure mode, site addresses are prefixed with `http://` to prevent Caddy from attempting TLS. Caddy reloads via its admin API when routes change.
+Each deployment gets a `.caddy` file in `/etc/caddy/sites/` mapping a subdomain to a localhost port. Caddy reloads via its admin API when routes change.
+
+**Docker** with gVisor provides container isolation. Each deploy is a Docker container with a two-phase build (init → runtime). Base images are pre-pulled for each supported language.
+
+### Kubernetes Backend (`"backend": "kubernetes"`)
+
+Each deploy becomes a **Pod + ClusterIP Service** in the cluster. The server itself handles subdomain routing via `httputil.ReverseProxy` — no Ingress controller required.
+
+| Component | Docker mode | K8s mode |
+|-----------|------------|----------|
+| Container runtime | Docker + gVisor | K8s Pods |
+| Reverse proxy | Caddy (external) | Built-in (`httputil.ReverseProxy`) |
+| TLS | Caddy ACME | Upstream (cloud LB, cert-manager) |
+| Storage | Docker volumes + host dirs | Shared PVC (server + app pods) |
+| Service discovery | `localhost:{port}` | K8s DNS (`ob-{id}.{ns}.svc.cluster.local`) |
+
+The server uses `container.Manager` and `proxy.Manager` interfaces — the Docker and K8s implementations are swapped at startup based on config. See [kubernetes.md](kubernetes.md) for deployment instructions and Helm chart reference.
+
+### Shared infrastructure
 
 **SQLite** (via `modernc.org/sqlite`, pure Go) stores users and deployments. The pure-Go implementation eliminates CGO — the server binary is fully static.
-
-**Docker** with gVisor provides container isolation. Base images are pre-pulled for each supported language.
 
 ## Persistent Data
 

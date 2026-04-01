@@ -1,0 +1,16 @@
+apiVersion: v2
+name: openberth
+description: Self-hosted deployment platform — give it code, get a live URL
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - deployment
+  - paas
+  - platform
+  - kubernetes
+home: https://github.com/AmirSoleimani/openberth
+sources:
+  - https://github.com/AmirSoleimani/openberth
+maintainers:
+  - name: Amir Soleimani

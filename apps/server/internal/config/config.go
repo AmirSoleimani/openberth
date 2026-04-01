@@ -27,6 +27,7 @@ type Config struct {
 	CloudflareProxy bool              `json:"cloudflareProxy"`
 	Insecure        bool              `json:"insecure"`
 	MasterKey       string            `json:"masterKey"`
+	Backend         string            `json:"backend"` // "docker" (default) or "kubernetes"
 
 	// Derived paths
 	DeploysDir     string `json:"-"`

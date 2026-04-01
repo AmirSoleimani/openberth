@@ -21,15 +21,15 @@ type BandwidthManager interface {
 type Service struct {
 	Cfg       *config.Config
 	Store     *store.Store
-	Container *container.ContainerManager
-	Proxy     *proxy.ProxyManager
+	Container container.Manager
+	Proxy     proxy.Manager
 	DataStore *datastore.Manager
 	Bandwidth BandwidthManager
 }
 
 // NewService creates a new Service. The BandwidthManager is set later
 // via SetBandwidth to break the circular dependency.
-func NewService(cfg *config.Config, s *store.Store, cm *container.ContainerManager, pm *proxy.ProxyManager, ds *datastore.Manager) *Service {
+func NewService(cfg *config.Config, s *store.Store, cm container.Manager, pm proxy.Manager, ds *datastore.Manager) *Service {
 	return &Service{
 		Cfg:       cfg,
 		Store:     s,

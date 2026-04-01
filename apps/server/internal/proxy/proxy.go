@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,3 +197,6 @@ func (p *ProxyManager) reload() {
 		exec.Command("caddy", "reload", "--config", "/etc/caddy/Caddyfile").Run()
 	}
 }
+
+// Handler returns nil — Caddy handles routing externally.
+func (p *ProxyManager) Handler() http.Handler { return nil }

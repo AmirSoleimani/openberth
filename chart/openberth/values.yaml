@@ -1,0 +1,103 @@
+# OpenBerth Helm Chart — default values
+# Override any of these in your own values file or via --set flags.
+
+# -- Number of server replicas. Only 1 is supported (SQLite-backed).
+replicaCount: 1
+
+image:
+  # -- Server image repository
+  repository: ghcr.io/amirsoleimani/openberth
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag (default: appVersion from Chart.yaml)
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Domain for deployments. Apps are accessible at {name}.{domain}.
+domain: localhost
+
+# -- Run without TLS. Set to false when TLS is terminated upstream (LB, ingress).
+insecure: true
+
+# -- Default deployment TTL in hours (0 = never expire)
+defaultTTLHours: 72
+
+# -- Max deployments per user
+defaultMaxDeploys: 10
+
+# -- Container resource defaults for deployed apps
+containerDefaults:
+  memory: "512m"
+  cpus: "0.5"
+  pidsLimit: 256
+
+serviceAccount:
+  # -- Create a ServiceAccount for the server
+  create: true
+  # -- Annotations to add to the ServiceAccount
+  annotations: {}
+  # -- Name override (default: release fullname)
+  name: ""
+
+rbac:
+  # -- Create ClusterRole and ClusterRoleBinding for pod/service management
+  create: true
+
+persistence:
+  # -- Enable persistent storage for server data (SQLite, deploys, uploads)
+  enabled: true
+  # -- Storage class (empty = cluster default)
+  storageClass: ""
+  # -- PVC access mode
+  accessMode: ReadWriteOnce
+  # -- Storage size
+  size: 10Gi
+  # -- Use an existing PVC instead of creating one
+  existingClaim: ""
+
+service:
+  # -- Service type: NodePort for local dev, ClusterIP for production behind ingress
+  type: NodePort
+  # -- Server port
+  port: 3456
+  # -- NodePort (only used when type=NodePort, 0 = auto-assign)
+  nodePort: 30456
+
+ingress:
+  # -- Enable Ingress for the server and wildcard app routing
+  enabled: false
+  # -- Ingress class name (e.g. nginx, traefik)
+  className: ""
+  # -- Additional annotations
+  annotations: {}
+  # -- TLS configuration
+  tls: []
+  #  - secretName: openberth-tls
+  #    hosts:
+  #      - deploy.example.com
+  #      - "*.deploy.example.com"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- Node selector for server pod scheduling
+nodeSelector: {}
+
+# -- Tolerations for server pod scheduling
+tolerations: []
+
+# -- Affinity rules for server pod scheduling
+affinity: {}
+
+# -- Additional environment variables for the server pod
+extraEnv: []
+#  - name: OPENBERTH_K8S_NAMESPACE
+#    value: custom-namespace

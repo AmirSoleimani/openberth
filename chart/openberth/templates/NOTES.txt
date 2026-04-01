@@ -1,0 +1,41 @@
+OpenBerth has been deployed!
+
+{{- if eq .Values.service.type "NodePort" }}
+
+1. Access the server:
+   http://localhost:{{ .Values.service.nodePort }}
+
+2. Complete initial setup:
+   Open http://localhost:{{ .Values.service.nodePort }}/setup in your browser.
+
+3. Deployed apps are available at:
+   http://{name}.{{ .Values.domain }}:{{ .Values.service.nodePort }}
+
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+1. Port-forward to access the server:
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "openberth.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+2. Complete initial setup:
+   Open http://localhost:{{ .Values.service.port }}/setup in your browser.
+
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+1. Get the external IP:
+   kubectl get svc -n {{ .Release.Namespace }} {{ include "openberth.fullname" . }}
+
+2. Complete initial setup at the external IP.
+
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Ingress is enabled. Access via:
+   https://{{ .Values.domain }}
+
+Deployed apps will be available at:
+   https://{name}.{{ .Values.domain }}
+{{- end }}
+
+Gallery:  /gallery/
+Docs:     https://github.com/AmirSoleimani/openberth

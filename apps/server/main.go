@@ -214,6 +214,25 @@ func main() {
 
 	// ── Startup reconciliation ──────────────────────────────────────
 	svc.ReconcileOnStartup()
+	// Push initial config to Caddy sidecar (K8s mode only).
+	// Retry because the sidecar may not be ready yet.
+	if cfg.Backend == "kubernetes" {
+		go func() {
+			for i := 0; i < 10; i++ {
+				pm.Reload()
+				resp, err := http.Get("http://localhost:80/health")
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						log.Println("[k8s-caddy] Initial config pushed successfully")
+						return
+					}
+				}
+				time.Sleep(2 * time.Second)
+			}
+			log.Println("[k8s-caddy] Warning: could not push initial config after retries")
+		}()
+	}
 
 	// ── Cleanup scheduler ───────────────────────────────────────────
 	go func() {

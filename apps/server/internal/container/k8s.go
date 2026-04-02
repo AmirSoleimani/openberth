@@ -37,11 +37,12 @@ const (
 
 // K8sManager implements Manager using Kubernetes Pods and Services.
 type K8sManager struct {
-	cfg       *config.Config
-	client    kubernetes.Interface
-	restCfg   *rest.Config
-	namespace string
-	serverPVC string // PVC name shared with the server for code access
+	cfg            *config.Config
+	client         kubernetes.Interface
+	restCfg        *rest.Config
+	namespace      string
+	serverPVC      string // PVC name shared with the server for code access
+	gvisorRuntime  *string // non-nil if gVisor RuntimeClass exists
 }
 
 // NewK8sManager creates a K8s-backed container manager.
@@ -86,7 +87,26 @@ func NewK8sManager(cfg *config.Config) (*K8sManager, error) {
 		return nil, fmt.Errorf("ensure namespace: %w", err)
 	}
 
+	// Check if gVisor RuntimeClass exists in the cluster
+	km.gvisorRuntime = km.detectGVisorRuntime()
+	if km.gvisorRuntime != nil {
+		log.Printf("[k8s] gVisor RuntimeClass detected: %s", *km.gvisorRuntime)
+	}
+
 	return km, nil
+}
+
+// detectGVisorRuntime checks if a gVisor RuntimeClass exists.
+// Looks for "gvisor" or "runsc" RuntimeClass names.
+func (km *K8sManager) detectGVisorRuntime() *string {
+	ctx := context.Background()
+	for _, name := range []string{"gvisor", "runsc"} {
+		_, err := km.client.NodeV1().RuntimeClasses().Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			return &name
+		}
+	}
+	return nil
 }
 
 func (km *K8sManager) ensureNamespace() error {
@@ -106,7 +126,14 @@ func (km *K8sManager) ensureNamespace() error {
 }
 
 func (km *K8sManager) GVisorAvailable() bool {
-	return false
+	return km.gvisorRuntime != nil
+}
+
+// applyGVisor sets the RuntimeClassName on the pod spec if gVisor is available.
+func (km *K8sManager) applyGVisor(spec *corev1.PodSpec) {
+	if km.gvisorRuntime != nil {
+		spec.RuntimeClassName = km.gvisorRuntime
+	}
 }
 
 func (km *K8sManager) podName(deployID string) string {
@@ -391,6 +418,8 @@ func (km *K8sManager) Create(opts CreateOpts) (*ContainerResult, error) {
 		}
 	}
 
+	km.applyGVisor(&pod.Spec)
+
 	ctx := context.Background()
 	created, err := km.client.CoreV1().Pods(km.namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
@@ -415,7 +444,7 @@ func (km *K8sManager) Create(opts CreateOpts) (*ContainerResult, error) {
 		ContainerID: string(created.UID),
 		HostPort:    hostPort,
 		Name:        podName,
-		GVisor:      false,
+		GVisor:      km.gvisorRuntime != nil,
 	}, nil
 }
 
@@ -630,6 +659,8 @@ func (km *K8sManager) CreateSandbox(opts SandboxOpts) (*ContainerResult, error) 
 		},
 	}
 
+	km.applyGVisor(&pod.Spec)
+
 	ctx := context.Background()
 	created, err := km.client.CoreV1().Pods(km.namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
@@ -650,7 +681,7 @@ func (km *K8sManager) CreateSandbox(opts SandboxOpts) (*ContainerResult, error) 
 		ContainerID: string(created.UID),
 		HostPort:    hostPort,
 		Name:        podName,
-		GVisor:      false,
+		GVisor:      km.gvisorRuntime != nil,
 	}, nil
 }
 

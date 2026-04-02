@@ -8,12 +8,16 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
+    - port: 80
       targetPort: http
       protocol: TCP
       name: http
       {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
       nodePort: {{ .Values.service.nodePort }}
       {{- end }}
+    - port: 443
+      targetPort: https
+      protocol: TCP
+      name: https
   selector:
     {{- include "openberth.selectorLabels" . | nindent 4 }}

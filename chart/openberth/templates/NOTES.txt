@@ -14,10 +14,10 @@ OpenBerth has been deployed!
 {{- else if eq .Values.service.type "ClusterIP" }}
 
 1. Port-forward to access the server:
-   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "openberth.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "openberth.fullname" . }} 8080:80
 
 2. Complete initial setup:
-   Open http://localhost:{{ .Values.service.port }}/setup in your browser.
+   Open http://localhost:8080/setup in your browser.
 
 {{- else if eq .Values.service.type "LoadBalancer" }}
 

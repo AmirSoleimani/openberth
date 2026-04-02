@@ -1,70 +1,106 @@
 # Kubernetes Deployment
 
-OpenBerth can run on Kubernetes as an alternative to the default Docker+Caddy mode. In K8s mode, each deployment becomes a Pod with a ClusterIP Service, and the OpenBerth server itself acts as the reverse proxy — no Ingress controller required.
+OpenBerth runs on Kubernetes as an alternative to the default Docker+Caddy single-server mode. Each deployment becomes a Pod with a ClusterIP Service. A Caddy sidecar handles TLS, compression, websockets, and subdomain routing — no Ingress controller required.
 
 ## Prerequisites
 
 - A Kubernetes cluster (Docker Desktop, k3s, EKS, GKE, AKS, etc.)
 - `kubectl` configured for your cluster
 - `helm` v3+
-- The `openberth-server` container image (build from source or pull from registry)
 
-## Quick Start
+## DNS Setup
+
+Same as the single-server install — point both the root domain and a wildcard at your cluster:
+
+```
+A     deploy.example.com       → K8s LoadBalancer/Node IP
+A     *.deploy.example.com     → K8s LoadBalancer/Node IP
+```
+
+For local development with Docker Desktop, no DNS is needed — `*.localhost` resolves automatically.
+
+## Install with Helm
+
+**1. Build the server image** (or pull from a registry):
 
 ```bash
-# Build the image (from repo root)
-docker build -t openberth-server:local -f deploy/k8s/Dockerfile .
+docker build -t openberth-server:local .
+```
 
-# Install with Helm
+**2. Install the chart:**
+
+```bash
 helm install openberth ./chart/openberth \
   --namespace openberth --create-namespace \
   --set image.repository=openberth-server \
   --set image.tag=local \
   --set image.pullPolicy=Never
-
-# Complete setup
-open http://localhost:30456/setup
 ```
 
-After setup, deploy apps via the CLI, MCP, or API. Each deploy creates a Pod in the `openberth` namespace.
+**3. Complete initial setup:**
+
+Open `http://localhost:30080/setup` in your browser, create the admin user.
+
+**4. Configure the CLI:**
+
+```bash
+berth config set server http://localhost:30080
+berth config set key sc_your_admin_key_here
+```
+
+## Verify
+
+```bash
+berth version
+# Should show CLI version, server version, and domain
+
+berth deploy ./examples/jsxapp
+# Should return a live URL
+```
+
+Deployed apps are available at `http://{name}.localhost:30080`.
 
 ## Architecture
 
 ```
-                          ┌─────────────────────────────────┐
-                          │         K8s Cluster              │
-                          │                                  │
- Browser/CLI ──► NodePort ──► ┌──────────────────┐           │
-                30456     │   │  OpenBerth Server │           │
-                          │   │  (Deployment)     │           │
-                          │   │                   │           │
-                          │   │  API: /api/*      │           │
-                          │   │  Gallery: /gallery│           │
-                          │   │  Proxy: *.domain  ├──►  ob-{id} Pod + Svc
-                          │   │  (built-in)       ├──►  ob-{id} Pod + Svc
-                          │   │                   ├──►  ob-{id} Pod + Svc
-                          │   └────────┬──────────┘           │
-                          │            │                      │
-                          │            ▼                      │
-                          │   ┌──────────────────┐           │
-                          │   │  PVC (shared)     │           │
-                          │   │  SQLite, deploys  │           │
-                          │   └──────────────────┘           │
-                          └─────────────────────────────────┘
+                        ┌──────────────────────────────────────┐
+                        │            K8s Cluster                │
+                        │                                       │
+Browser/CLI ──► Service ──► ┌─────────────────────────────┐    │
+              (port 80) │   │  OpenBerth Pod               │    │
+                        │   │                              │    │
+                        │   │  ┌────────┐   ┌───────────┐ │    │
+                        │   │  │ Caddy  │──►│  Server   │ │    │
+                        │   │  │ :80    │   │  :3456    │ │    │
+                        │   │  │ :443   │   │  (API,    │ │    │
+                        │   │  │ :2019  │◄──│   gallery)│ │    │
+                        │   │  │(admin) │   └───────────┘ │    │
+                        │   │  └───┬────┘                  │    │
+                        │   └──────┼───────────────────────┘    │
+                        │          │                             │
+                        │          ├──► ob-{id} Pod + Svc        │
+                        │          ├──► ob-{id} Pod + Svc        │
+                        │          └──► ob-{id} Pod + Svc        │
+                        │                                       │
+                        │   ┌──────────────────┐                │
+                        │   │  PVC (shared)     │                │
+                        │   │  SQLite, deploys  │                │
+                        │   └──────────────────┘                │
+                        └──────────────────────────────────────┘
 ```
 
-**Key difference from Docker mode:** In Docker mode, Caddy handles TLS and subdomain routing externally. In K8s mode, the server handles subdomain routing itself via `httputil.ReverseProxy` — inspecting the `Host` header and forwarding to the correct ClusterIP Service. TLS is handled upstream (cloud LB, ingress controller, or service mesh).
+The Caddy sidecar runs in the same pod as the server. It receives all external traffic, routes subdomain requests to deployed app Pods, and proxies API/gallery traffic to the server. The server pushes route updates to Caddy via its admin API (`localhost:2019`).
 
-## Helm Chart Configuration
+## Helm Chart Options
 
-### Minimal (local dev)
+### Local dev (defaults)
 
 ```bash
 helm install openberth ./chart/openberth \
   --namespace openberth --create-namespace
 ```
 
-Defaults: `NodePort:30456`, `insecure: true`, `domain: localhost`, `10Gi` storage.
+Defaults: `NodePort:30080`, `insecure: true`, `domain: localhost`, `10Gi` storage.
 
 ### Production
 
@@ -90,40 +126,22 @@ helm install openberth ./chart/openberth \
 | `replicaCount` | `1` | Server replicas (only 1 supported — SQLite) |
 | `image.repository` | `ghcr.io/amirsoleimani/openberth` | Server image |
 | `image.tag` | `appVersion` | Image tag |
+| `caddy.image` | `caddy:2-alpine` | Caddy sidecar image |
 | `service.type` | `NodePort` | `NodePort`, `ClusterIP`, or `LoadBalancer` |
-| `service.port` | `3456` | Server listen port |
-| `service.nodePort` | `30456` | Fixed port (only when type=NodePort) |
+| `service.port` | `3456` | Server API port (internal) |
+| `service.nodePort` | `30080` | External port (only when type=NodePort) |
 | `ingress.enabled` | `false` | Create Ingress for server + wildcard |
 | `ingress.className` | `""` | Ingress class (nginx, traefik) |
 | `persistence.size` | `10Gi` | PVC size for SQLite, deploys, uploads |
 | `persistence.existingClaim` | `""` | Use existing PVC |
+| `pdb.enabled` | `true` | Create PodDisruptionBudget |
+| `pdb.maxUnavailable` | `0` | Pods allowed to be unavailable during disruptions |
 | `containerDefaults.memory` | `512m` | Default memory for deployed apps |
 | `containerDefaults.cpus` | `0.5` | Default CPU for deployed apps |
 | `defaultTTLHours` | `72` | Default deployment TTL |
 | `defaultMaxDeploys` | `10` | Max deployments per user |
 
-## How It Works
-
-### Deploying an app
-
-1. User sends code via CLI/MCP/API
-2. Server writes files to the shared PVC at `/var/lib/openberth/deploys/{id}/`
-3. Server creates a Pod + Service in the `openberth` namespace
-4. For static sites: Caddy pod serves from `/srv` (shared PVC subpath)
-5. For dynamic apps: init container runs build, main container runs the app
-6. Server registers a route in its in-memory proxy table
-7. Requests to `{name}.{domain}` are reverse-proxied to the Pod's Service
-
-### RBAC
-
-The server needs permissions to manage Pods, Services, and PVCs in its namespace. The Helm chart creates a `ClusterRole` and `ClusterRoleBinding` for this. The permissions are:
-
-- `pods`, `pods/log`, `pods/exec` — create/manage deployed apps
-- `services` — expose pods via ClusterIP
-- `persistentvolumeclaims` — workspace and data volumes
-- `namespaces` — ensure the target namespace exists
-
-### TLS
+## TLS
 
 The server runs HTTP internally. TLS should be terminated upstream:
 
@@ -134,14 +152,21 @@ The server runs HTTP internally. TLS should be terminated upstream:
 | Bare-metal K8s | cert-manager + Ingress controller |
 | Behind Cloudflare | Cloudflare edge TLS (same as Docker `--cloudflare` mode) |
 
-### DNS
+## Sandbox Isolation (gVisor)
 
-Same as Docker mode — point the domain and wildcard to the cluster:
+OpenBerth auto-detects gVisor at startup — if a `gvisor` or `runsc` RuntimeClass exists in the cluster, all deployed app pods use it automatically. No configuration needed.
 
+**GKE:** Enable "Sandbox" on the node pool — gVisor is supported natively.
+
+**Other clusters:** Install gVisor with the official DaemonSet installer:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/google/gvisor/master/tools/installers/containerd/runsc-overlay.yaml
 ```
-A     deploy.company.com       → K8s LoadBalancer/Node IP
-A     *.deploy.company.com     → K8s LoadBalancer/Node IP
-```
+
+This installs `runsc` on every node and creates the RuntimeClass. OpenBerth picks it up on next restart.
+
+**Without gVisor:** Everything works — pods run with the default runtime (runc). gVisor is recommended when running untrusted code from multiple users on shared infrastructure.
 
 ## Accessing Deployed Apps
 
@@ -149,18 +174,18 @@ Deployed apps are accessible at `http(s)://{name}.{domain}` — how you reach th
 
 | Setup | Example URL | How traffic reaches the server |
 |-------|-------------|-------------------------------|
-| Local dev (NodePort) | `http://myapp.localhost:30456` | Browser → NodePort → server pod |
-| Cloud LB (no chart Ingress) | `https://myapp.deploy.company.com` | Browser → your LB → K8s Service → server pod |
-| Chart Ingress enabled | `https://myapp.deploy.company.com` | Browser → Ingress controller → server pod |
-| Port-forward | `http://myapp.localhost:3456` | Browser → kubectl tunnel → server pod |
+| Local dev (NodePort) | `http://myapp.localhost:30080` | Browser → NodePort → Caddy → app pod |
+| Cloud LB | `https://myapp.deploy.company.com` | Browser → LB → Caddy → app pod |
+| Chart Ingress enabled | `https://myapp.deploy.company.com` | Browser → Ingress → Caddy → app pod |
+| Port-forward | `http://myapp.localhost:8080` | Browser → kubectl tunnel → Caddy → app pod |
 
-The server handles subdomain routing internally regardless of how traffic arrives. Point your DNS wildcard (`*.{domain}`) at whatever fronts the cluster — a cloud LB, a node IP, an Ingress controller, or your own reverse proxy.
+The Caddy sidecar handles subdomain routing internally. Point your DNS wildcard (`*.{domain}`) at whatever fronts the cluster.
 
 ## Upgrading
 
 ```bash
 # Build new image
-docker build -t openberth-server:local -f deploy/k8s/Dockerfile .
+docker build -t openberth-server:local .
 
 # Upgrade the release
 helm upgrade openberth ./chart/openberth \

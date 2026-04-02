@@ -29,7 +29,7 @@ spec:
           image: {{ include "openberth.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: http
+            - name: api
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
@@ -47,13 +47,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: http
+              port: api
             initialDelaySeconds: 5
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /health
-              port: http
+              port: api
             initialDelaySeconds: 3
             periodSeconds: 10
           volumeMounts:
@@ -66,6 +66,31 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+        # Caddy sidecar — handles TLS, compression, websockets, and
+        # subdomain routing. The server pushes routes via Caddy's admin API.
+        - name: caddy
+          image: {{ .Values.caddy.image }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          args: ["caddy", "run", "--config", "/dev/null", "--adapter", ""]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}

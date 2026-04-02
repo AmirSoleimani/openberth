@@ -1,87 +1,92 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/AmirSoleimani/openberth/apps/server/internal/config"
-	"golang.org/x/crypto/bcrypt"
 )
-
-// route holds the backend URL and access control for a subdomain.
-type route struct {
-	subdomain string
-	backend   *url.URL // e.g. http://ob-{deployID}.openberth.svc.cluster.local
-	ac        *AccessControl
-	blocked   bool
-}
 
 // SubdomainResolver maps a subdomain to a deploy ID so the proxy can
 // find the correct K8s service (ob-{deployID}).
 type SubdomainResolver func(subdomain string) string
 
-// K8sProxyManager implements Manager using an in-memory route table and
-// Go's httputil.ReverseProxy. The OpenBerth server itself proxies subdomain
-// traffic to K8s ClusterIP services — no Ingress controller needed.
+// K8sProxyManager implements Manager using a Caddy sidecar container.
+// Routes are pushed to Caddy's admin API (localhost:2019) as JSON config.
+// Caddy handles TLS, compression, websockets, and reverse proxying to
+// K8s ClusterIP services.
 type K8sProxyManager struct {
 	cfg       *config.Config
 	namespace string
 	resolver  SubdomainResolver
+	adminURL  string // Caddy admin API, default http://localhost:2019
 
 	mu     sync.RWMutex
-	routes map[string]*route // subdomain → route
+	routes map[string]*k8sRoute // subdomain → route
 }
 
-// NewK8sProxyManager creates an in-memory proxy manager for K8s mode.
+type k8sRoute struct {
+	subdomain string
+	backend   string // e.g. ob-{deployID}.openberth.svc.cluster.local
+	ac        *AccessControl
+	blocked   bool
+}
+
+// NewK8sProxyManager creates a proxy manager that pushes config to a Caddy sidecar.
 func NewK8sProxyManager(cfg *config.Config) (*K8sProxyManager, error) {
 	ns := os.Getenv("OPENBERTH_K8S_NAMESPACE")
 	if ns == "" {
 		ns = "openberth"
 	}
 
+	adminURL := os.Getenv("CADDY_ADMIN_URL")
+	if adminURL == "" {
+		adminURL = "http://localhost:2019"
+	}
+
 	return &K8sProxyManager{
 		cfg:       cfg,
 		namespace: ns,
-		routes:    make(map[string]*route),
+		adminURL:  adminURL,
+		routes:    make(map[string]*k8sRoute),
 	}, nil
 }
 
 // SetResolver sets the function that maps subdomain → deploy ID.
-// Must be called before routes are added (typically at startup).
 func (kp *K8sProxyManager) SetResolver(fn SubdomainResolver) {
 	kp.resolver = fn
 }
 
-// backendURL returns the in-cluster service URL for a subdomain.
-func (kp *K8sProxyManager) backendURL(subdomain string) *url.URL {
-	svcName := "ob-" + subdomain // fallback
+// backendHost returns the in-cluster service hostname for a subdomain.
+func (kp *K8sProxyManager) backendHost(subdomain string) string {
+	svcName := "ob-" + subdomain
 	if kp.resolver != nil {
 		if deployID := kp.resolver(subdomain); deployID != "" {
 			svcName = "ob-" + deployID
 		}
 	}
-	host := fmt.Sprintf("%s.%s.svc.cluster.local", svcName, kp.namespace)
-	return &url.URL{Scheme: "http", Host: host}
+	return fmt.Sprintf("%s.%s.svc.cluster.local", svcName, kp.namespace)
 }
 
-// AddRoute registers a subdomain → K8s service mapping.
+// AddRoute registers a subdomain and pushes the updated config to Caddy.
 func (kp *K8sProxyManager) AddRoute(subdomain string, hostPort int, ac *AccessControl) string {
-	backend := kp.backendURL(subdomain)
+	backend := kp.backendHost(subdomain)
 	kp.mu.Lock()
-	kp.routes[subdomain] = &route{
+	kp.routes[subdomain] = &k8sRoute{
 		subdomain: subdomain,
 		backend:   backend,
 		ac:        ac,
 	}
 	kp.mu.Unlock()
 
-	log.Printf("[k8s-proxy] Added route: %s → %s", subdomain, backend)
+	kp.pushConfig()
+	log.Printf("[k8s-caddy] Added route: %s → %s", subdomain, backend)
 
 	scheme := "https"
 	if kp.cfg.Insecure {
@@ -90,11 +95,11 @@ func (kp *K8sProxyManager) AddRoute(subdomain string, hostPort int, ac *AccessCo
 	return scheme + "://" + subdomain + "." + kp.cfg.Domain
 }
 
-// AddRouteNoReload is identical to AddRoute (no reload concept for in-memory routes).
+// AddRouteNoReload registers a route without pushing to Caddy (batch mode).
 func (kp *K8sProxyManager) AddRouteNoReload(subdomain string, hostPort int, ac *AccessControl) {
-	backend := kp.backendURL(subdomain)
+	backend := kp.backendHost(subdomain)
 	kp.mu.Lock()
-	kp.routes[subdomain] = &route{
+	kp.routes[subdomain] = &k8sRoute{
 		subdomain: subdomain,
 		backend:   backend,
 		ac:        ac,
@@ -102,30 +107,32 @@ func (kp *K8sProxyManager) AddRouteNoReload(subdomain string, hostPort int, ac *
 	kp.mu.Unlock()
 }
 
-// RemoveRoute removes a subdomain from the route table.
+// RemoveRoute removes a subdomain and pushes the updated config to Caddy.
 func (kp *K8sProxyManager) RemoveRoute(subdomain string) {
 	kp.mu.Lock()
 	delete(kp.routes, subdomain)
 	kp.mu.Unlock()
-	log.Printf("[k8s-proxy] Removed route: %s", subdomain)
+	kp.pushConfig()
+	log.Printf("[k8s-caddy] Removed route: %s", subdomain)
 }
 
-// RemoveRouteNoReload is identical to RemoveRoute.
+// RemoveRouteNoReload removes a route without pushing to Caddy.
 func (kp *K8sProxyManager) RemoveRouteNoReload(subdomain string) {
 	kp.mu.Lock()
 	delete(kp.routes, subdomain)
 	kp.mu.Unlock()
 }
 
-// RemoveAllRoutes clears the entire route table.
+// RemoveAllRoutes clears all routes and pushes empty config to Caddy.
 func (kp *K8sProxyManager) RemoveAllRoutes() {
 	kp.mu.Lock()
-	kp.routes = make(map[string]*route)
+	kp.routes = make(map[string]*k8sRoute)
 	kp.mu.Unlock()
-	log.Printf("[k8s-proxy] Removed all routes")
+	kp.pushConfig()
+	log.Printf("[k8s-caddy] Removed all routes")
 }
 
-// BlockRouteNoReload marks a route as blocked (returns 503).
+// BlockRouteNoReload marks a route as blocked (Caddy will serve 503).
 func (kp *K8sProxyManager) BlockRouteNoReload(subdomain string) {
 	kp.mu.Lock()
 	if r, ok := kp.routes[subdomain]; ok {
@@ -135,7 +142,6 @@ func (kp *K8sProxyManager) BlockRouteNoReload(subdomain string) {
 }
 
 // ListCaddyFiles returns all registered subdomain names.
-// Named for interface compat with the Caddy proxy manager.
 func (kp *K8sProxyManager) ListCaddyFiles() []string {
 	kp.mu.RLock()
 	defer kp.mu.RUnlock()
@@ -146,108 +152,200 @@ func (kp *K8sProxyManager) ListCaddyFiles() []string {
 	return names
 }
 
-// Reload is a no-op — routes are applied immediately in memory.
-func (kp *K8sProxyManager) Reload() {}
+// Reload pushes the current route table to Caddy.
+func (kp *K8sProxyManager) Reload() {
+	kp.pushConfig()
+}
 
-// Handler returns an http.Handler that inspects the Host header and
-// reverse-proxies matching subdomain requests to K8s services.
+// Handler returns nil — Caddy sidecar handles all routing externally.
 func (kp *K8sProxyManager) Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		subdomain := kp.extractSubdomain(r.Host)
-		if subdomain == "" {
-			http.Error(w, "Not Found", http.StatusNotFound)
-			return
-		}
+	return nil
+}
 
-		kp.mu.RLock()
-		rt, ok := kp.routes[subdomain]
-		kp.mu.RUnlock()
+// pushConfig builds a full Caddy JSON config from the route table and
+// POSTs it to the Caddy admin API.
+func (kp *K8sProxyManager) pushConfig() {
+	cfg := kp.buildCaddyConfig()
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		log.Printf("[k8s-caddy] Failed to marshal config: %v", err)
+		return
+	}
 
-		if !ok {
-			http.Error(w, "Deployment not found", http.StatusNotFound)
-			return
-		}
+	resp, err := http.Post(kp.adminURL+"/load", "application/json", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[k8s-caddy] Failed to push config: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(resp.Body)
+		log.Printf("[k8s-caddy] Caddy rejected config (status %d): %s", resp.StatusCode, buf.String())
+	}
+}
+
+// buildCaddyConfig generates the full Caddy JSON config with:
+// - A route for the main domain → upstream server (API, gallery)
+// - A route per deployed app → K8s service
+func (kp *K8sProxyManager) buildCaddyConfig() map[string]interface{} {
+	kp.mu.RLock()
+	defer kp.mu.RUnlock()
+
+	serverAddr := fmt.Sprintf("localhost:%d", kp.cfg.Port)
+
+	// Build routes for deployed apps
+	var srvRoutes []map[string]interface{}
+
+	for _, rt := range kp.routes {
+		fqdn := rt.subdomain + "." + kp.cfg.Domain
 
 		if rt.blocked {
-			http.Error(w, "Bandwidth quota exceeded", http.StatusServiceUnavailable)
-			return
+			// Blocked route: respond with 503
+			srvRoutes = append(srvRoutes, map[string]interface{}{
+				"match": []map[string]interface{}{
+					{"host": []string{fqdn}},
+				},
+				"handle": []map[string]interface{}{
+					{
+						"handler":     "static_response",
+						"status_code": "503",
+						"body":        "Bandwidth quota exceeded",
+					},
+				},
+			})
+			continue
 		}
 
-		if rt.ac != nil && !kp.checkAccess(rt.ac, r) {
-			w.Header().Set("WWW-Authenticate", `Basic realm="OpenBerth"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+		handlers := []map[string]interface{}{}
+
+		// Access control
+		if rt.ac != nil {
+			switch rt.ac.Mode {
+			case "basic_auth":
+				handlers = append(handlers, map[string]interface{}{
+					"handler": "authentication",
+					"providers": map[string]interface{}{
+						"http_basic": map[string]interface{}{
+							"accounts": []map[string]interface{}{
+								{
+									"username": rt.ac.Username,
+									"password": rt.ac.Hash,
+								},
+							},
+						},
+					},
+				})
+			case "api_key":
+				if rt.ac.Hash != "" {
+					handlers = append(handlers, map[string]interface{}{
+						"handler": "reverse_proxy",
+						"upstreams": []map[string]interface{}{
+							{"dial": serverAddr},
+						},
+						"rewrite": map[string]interface{}{
+							"uri": fmt.Sprintf("/internal/auth-check?subdomain=%s", rt.subdomain),
+						},
+					})
+				}
+			case "user":
+				handlers = append(handlers, map[string]interface{}{
+					"handler": "reverse_proxy",
+					"upstreams": []map[string]interface{}{
+						{"dial": serverAddr},
+					},
+					"rewrite": map[string]interface{}{
+						"uri": fmt.Sprintf("/internal/auth-check?subdomain=%s", rt.ac.Subdomain),
+					},
+				})
+			}
 		}
 
-		proxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				req.URL.Scheme = rt.backend.Scheme
-				req.URL.Host = rt.backend.Host
-				req.Host = r.Host
+		// Reverse proxy to the K8s service
+		handlers = append(handlers, map[string]interface{}{
+			"handler": "reverse_proxy",
+			"upstreams": []map[string]interface{}{
+				{"dial": rt.backend + ":80"},
 			},
-			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				log.Printf("[k8s-proxy] Proxy error for %s: %v", subdomain, err)
-				http.Error(w, "Service unavailable", http.StatusBadGateway)
+		})
+
+		// Encode gzip
+		handlers = append(handlers, map[string]interface{}{
+			"handler": "encode",
+			"encodings": map[string]interface{}{
+				"gzip": map[string]interface{}{},
 			},
-		}
-		proxy.ServeHTTP(w, r)
+		})
+
+		srvRoutes = append(srvRoutes, map[string]interface{}{
+			"match": []map[string]interface{}{
+				{"host": []string{fqdn}},
+			},
+			"handle": handlers,
+		})
+	}
+
+	// Default route: proxy everything else to the OpenBerth server
+	srvRoutes = append(srvRoutes, map[string]interface{}{
+		"handle": []map[string]interface{}{
+			{
+				"handler": "reverse_proxy",
+				"upstreams": []map[string]interface{}{
+					{"dial": serverAddr},
+				},
+			},
+		},
 	})
-}
 
-// extractSubdomain pulls the subdomain from a Host header like "myapp.localhost:30456".
-// Returns "" if the host is the main domain (no subdomain).
-func (kp *K8sProxyManager) extractSubdomain(host string) string {
-	if i := strings.LastIndex(host, ":"); i != -1 {
-		host = host[:i]
-	}
-	host = strings.ToLower(host)
-
-	domain := strings.ToLower(kp.cfg.Domain)
-	if !strings.HasSuffix(host, "."+domain) {
-		return ""
+	// Listen addresses
+	listen := []string{":80"}
+	if !kp.cfg.Insecure {
+		listen = append(listen, ":443")
 	}
 
-	sub := strings.TrimSuffix(host, "."+domain)
-	if strings.Contains(sub, ".") {
-		return ""
+	// Build server config
+	srv := map[string]interface{}{
+		"listen": listen,
+		"routes": srvRoutes,
 	}
-	return sub
-}
 
-// checkAccess validates the request against the route's access control.
-func (kp *K8sProxyManager) checkAccess(ac *AccessControl, r *http.Request) bool {
-	switch ac.Mode {
-	case "public", "":
-		return true
-	case "api_key":
-		return r.Header.Get("X-Api-Key") == ac.Hash
-	case "basic_auth":
-		user, pass, ok := r.BasicAuth()
-		if !ok {
-			return false
-		}
-		if user != ac.Username {
-			return false
-		}
-		return bcrypt.CompareHashAndPassword([]byte(ac.Hash), []byte(pass)) == nil
-	case "user":
-		// User mode requires a valid session or API key — delegate to the
-		// server's auth-check endpoint via an internal HTTP call.
-		checkURL := fmt.Sprintf("http://localhost:%d/internal/auth-check?subdomain=%s", kp.cfg.Port, ac.Subdomain)
-		req, err := http.NewRequest("GET", checkURL, nil)
-		if err != nil {
-			return false
-		}
-		// Forward auth headers from the original request
-		req.Header.Set("Cookie", r.Header.Get("Cookie"))
-		req.Header.Set("Authorization", r.Header.Get("Authorization"))
-		req.Header.Set("X-Api-Key", r.Header.Get("X-Api-Key"))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false
-		}
-		resp.Body.Close()
-		return resp.StatusCode == http.StatusOK
+	// TLS: auto_https off if insecure
+	apps := map[string]interface{}{
+		"http": map[string]interface{}{
+			"servers": map[string]interface{}{
+				"srv0": srv,
+			},
+		},
 	}
-	return true
+
+	if kp.cfg.Insecure {
+		apps["http"].(map[string]interface{})["servers"].(map[string]interface{})["srv0"].(map[string]interface{})["automatic_https"] = map[string]interface{}{
+			"disable": true,
+		}
+	}
+
+	// Build the wildcard domain list for on-demand TLS
+	if !kp.cfg.Insecure {
+		domains := []string{kp.cfg.Domain}
+		for sub := range kp.routes {
+			domains = append(domains, sub+"."+kp.cfg.Domain)
+		}
+		apps["tls"] = map[string]interface{}{
+			"automation": map[string]interface{}{
+				"policies": []map[string]interface{}{
+					{
+						"subjects": domains,
+					},
+				},
+			},
+		}
+	}
+
+	return map[string]interface{}{
+		"admin": map[string]interface{}{
+			"listen": strings.TrimPrefix(kp.adminURL, "http://"),
+		},
+		"apps": apps,
+	}
 }

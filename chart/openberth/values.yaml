@@ -16,6 +16,10 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# -- Caddy sidecar handles TLS, compression, websockets, and subdomain routing
+caddy:
+  image: caddy:2-alpine
+
 # -- Domain for deployments. Apps are accessible at {name}.{domain}.
 domain: localhost
 
@@ -59,12 +63,12 @@ persistence:
   existingClaim: ""
 
 service:
-  # -- Service type: NodePort for local dev, ClusterIP for production behind ingress
+  # -- Service type: NodePort for local dev, ClusterIP for production
   type: NodePort
-  # -- Server port
+  # -- OpenBerth server port (internal, API traffic)
   port: 3456
-  # -- NodePort (only used when type=NodePort, 0 = auto-assign)
-  nodePort: 30456
+  # -- NodePort for external access (only used when type=NodePort)
+  nodePort: 30080
 
 ingress:
   # -- Enable Ingress for the server and wildcard app routing
@@ -87,6 +91,12 @@ resources:
   limits:
     cpu: "1"
     memory: 512Mi
+
+pdb:
+  # -- Create a PodDisruptionBudget to protect against involuntary evictions
+  enabled: true
+  # -- Minimum pods that must remain available during disruptions (e.g. node drains)
+  maxUnavailable: 0
 
 # -- Node selector for server pod scheduling
 nodeSelector: {}

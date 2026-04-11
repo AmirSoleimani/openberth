@@ -1,0 +1,18 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openberth.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.pdb.minAvailable }}
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.pdb.maxUnavailable | default 0 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openberth.selectorLabels" . | nindent 6 }}
+{{- end }}

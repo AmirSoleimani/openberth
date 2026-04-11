@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-Self-hosted deployment platform: give it code, get a live URL. Node.js, Python, Go, Static HTML. Sandboxed in gVisor, auto-TLS via Caddy.
+Self-hosted deployment platform: give it code, get a live URL. Node.js, Python, Go, Static HTML. Two backends: Docker+Caddy (default) or Kubernetes (Helm chart).
 
 Three Go binaries, zero runtime deps: `apps/server` (daemon), `apps/cli` (client), `apps/mcp` (MCP stdio bridge).
 
@@ -81,7 +81,13 @@ When adding a tool: add definition + handler to **both**. Tool descriptions are 
 `berth deploy` auto-waits for build (polls 2s, up to 6 min), shows QR code, opens browser. `--no-wait` skips, `--no-qr` suppresses QR. QR auto-suppressed when piped. Shared `waitForBuild()` used by deploy, promote, and auto-update paths.
 
 ### Container model
-Two-phase: build (unconstrained memory, gVisor) → runtime (512MB/0.5 CPU, gVisor). Blue-green updates with rollback on failure. Sandbox mode: single container with dev server + HMR.
+Two backends: Docker (default) and Kubernetes. Both use `container.Manager` and `proxy.Manager` interfaces — swapped at startup via `config.Backend`.
+
+**Docker:** Two-phase build (unconstrained memory, gVisor) → runtime (512MB/0.5 CPU, gVisor). Blue-green updates with rollback. Caddy handles subdomain routing.
+
+**Kubernetes:** Each deploy = Pod + ClusterIP Service. Static sites mount code from shared PVC at `/srv`. Dynamic apps use init container for build. Server's built-in `httputil.ReverseProxy` handles subdomain routing — no Ingress controller needed. Helm chart at `chart/openberth/`.
+
+Sandbox mode: single container with dev server + HMR (both backends).
 
 ### `.berth.json` dual purpose
 CLI reads and writes client-side fields (`name`, `ttl`, `memory`, `port`, `protect`, `networkQuota`, `secrets`, `deploymentId`, `url`). Server reads override fields (`language`, `build`, `start`, `install`, `dev`). Both coexist in same file. Deploy parameters passed via flags are auto-persisted to `.berth.json` for subsequent deploys.

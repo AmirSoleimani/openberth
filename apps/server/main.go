@@ -49,15 +49,43 @@ func main() {
 	}
 	defer dataStore.Close()
 
-	// Initialize services
-	cm := container.NewContainerManager(cfg)
-	pm := proxy.NewProxyManager(cfg)
+	// Initialize services — backend selection
+	var cm container.Manager
+	var pm proxy.Manager
+	if cfg.Backend == "kubernetes" {
+		k8sCM, err := container.NewK8sManager(cfg)
+		if err != nil {
+			log.Fatalf("Failed to initialize K8s container manager: %v", err)
+		}
+		k8sPM, err := proxy.NewK8sProxyManager(cfg)
+		if err != nil {
+			log.Fatalf("Failed to initialize K8s proxy manager: %v", err)
+		}
+		// Wire the subdomain → deployID resolver so the proxy can find K8s services
+		k8sPM.SetResolver(func(subdomain string) string {
+			d, err := dataStore.GetDeploymentBySubdomain(subdomain)
+			if err != nil || d == nil {
+				return ""
+			}
+			return d.ID
+		})
+		cm = k8sCM
+		pm = k8sPM
+		log.Println("⚓ Backend: Kubernetes")
+	} else {
+		cm = container.NewContainerManager(cfg)
+		pm = proxy.NewProxyManager(cfg)
+		log.Println("⚓ Backend: Docker")
+	}
 	ds := datastore.NewManager(cfg.PersistDir)
 	defer ds.Close()
 
 	svc := service.NewService(cfg, dataStore, cm, pm, ds)
-	bt := bandwidth.NewTracker(svc, cfg.CaddyAccessLog)
-	svc.SetBandwidth(bt)
+	if cfg.Backend != "kubernetes" {
+		bt := bandwidth.NewTracker(svc, cfg.CaddyAccessLog)
+		svc.SetBandwidth(bt)
+		go bt.Run()
+	}
 
 	h := httphandler.NewHandlers(svc, version)
 	oauth := httphandler.NewOAuthHandlers(cfg, dataStore, h.Authenticate)
@@ -162,13 +190,49 @@ func main() {
 	mux.Handle("/mcp", mcpH)
 
 	// ── CORS middleware for browser-facing paths ────────────────────
-	handler := corsMiddleware(mux)
+	var handler http.Handler = corsMiddleware(mux)
+
+	// ── K8s built-in reverse proxy ─────────────────────────────────
+	// In K8s mode, the server itself proxies subdomain traffic to K8s
+	// services. If the Host header matches {sub}.{domain}, proxy it;
+	// otherwise, serve the normal API/gallery routes.
+	if proxyHandler := pm.Handler(); proxyHandler != nil {
+		apiHandler := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
+			if i := strings.LastIndex(host, ":"); i != -1 {
+				host = host[:i]
+			}
+			// If host is a subdomain of the configured domain, proxy it
+			if host != cfg.Domain && strings.HasSuffix(host, "."+cfg.Domain) {
+				proxyHandler.ServeHTTP(w, r)
+				return
+			}
+			apiHandler.ServeHTTP(w, r)
+		})
+	}
 
 	// ── Startup reconciliation ──────────────────────────────────────
 	svc.ReconcileOnStartup()
-
-	// ── Bandwidth tracker ───────────────────────────────────────────
-	go bt.Run()
+	// Push initial config to Caddy sidecar (K8s mode only).
+	// Retry because the sidecar may not be ready yet.
+	if cfg.Backend == "kubernetes" {
+		go func() {
+			for i := 0; i < 10; i++ {
+				pm.Reload()
+				resp, err := http.Get("http://localhost:80/health")
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						log.Println("[k8s-caddy] Initial config pushed successfully")
+						return
+					}
+				}
+				time.Sleep(2 * time.Second)
+			}
+			log.Println("[k8s-caddy] Warning: could not push initial config after retries")
+		}()
+	}
 
 	// ── Cleanup scheduler ───────────────────────────────────────────
 	go func() {
@@ -190,7 +254,11 @@ func main() {
 	}()
 
 	// ── Start server ────────────────────────────────────────────────
-	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	listenHost := "127.0.0.1"
+	if cfg.Backend == "kubernetes" {
+		listenHost = "0.0.0.0"
+	}
+	addr := fmt.Sprintf("%s:%d", listenHost, cfg.Port)
 
 	log.Println("")
 	log.Println("⚓ OpenBerth daemon starting")

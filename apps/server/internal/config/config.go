@@ -26,6 +26,7 @@ type Config struct {
 	Container       ContainerDefaults `json:"containerDefaults"`
 	CloudflareProxy bool              `json:"cloudflareProxy"`
 	Insecure        bool              `json:"insecure"`
+	WebDisabled     bool              `json:"webDisabled"`
 	MasterKey       string            `json:"masterKey"`
 
 	// Derived paths

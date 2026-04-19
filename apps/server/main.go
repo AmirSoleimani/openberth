@@ -67,19 +67,25 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Public
-	mux.HandleFunc("GET /{$}", h.Index)
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /api/gallery", h.Gallery)
 
-	// Login / Setup / Logout
-	mux.HandleFunc("GET /setup", h.SetupPage)
-	mux.HandleFunc("POST /setup", h.SetupSubmit)
-	mux.HandleFunc("GET /login", h.LoginPage)
-	mux.HandleFunc("POST /login", h.LoginSubmit)
+	// Always-available session management (kept even when web UI disabled,
+	// so OIDC-authenticated users can still logout / change password / rotate keys).
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/login/exchange", h.LoginExchange)
 	mux.HandleFunc("POST /api/me/password", h.ChangePassword)
 	mux.HandleFunc("POST /api/me/rotate-key", h.RotateAPIKey)
+
+	// Browser-facing pages (gallery SPA + login + setup + root redirect).
+	// Disabled when cfg.WebDisabled is true for API/CLI/OIDC-only deployments.
+	if !cfg.WebDisabled {
+		mux.HandleFunc("GET /{$}", h.Index)
+		mux.HandleFunc("GET /setup", h.SetupPage)
+		mux.HandleFunc("POST /setup", h.SetupSubmit)
+		mux.HandleFunc("GET /login", h.LoginPage)
+		mux.HandleFunc("POST /login", h.LoginSubmit)
+	}
 
 	// OIDC/SSO
 	mux.HandleFunc("GET /auth/oidc/start", h.OIDCStart)
@@ -125,22 +131,28 @@ func main() {
 	mux.HandleFunc("/oauth/authorize", oauth.Authorize) // GET+POST
 	mux.HandleFunc("POST /oauth/token", oauth.Token)
 
-	// Gallery SPA
+	// Gallery SPA (disabled when cfg.WebDisabled is true)
 	galleryDist, _ := fs.Sub(galleryFS, "gallery/dist")
 	galleryFileServer := http.FileServer(http.FS(galleryDist))
-	mux.HandleFunc("/gallery/", func(w http.ResponseWriter, r *http.Request) {
-		path := strings.TrimPrefix(r.URL.Path, "/gallery/")
-		if path == "" {
-			path = "index.html"
-		}
-		if _, err := fs.Stat(galleryDist, path); err == nil {
+	if cfg.WebDisabled {
+		// Intentionally do not register /gallery/. Requests fall through to
+		// ServeMux's default 404, matching a server that never had the SPA.
+		_ = galleryFileServer
+	} else {
+		mux.HandleFunc("/gallery/", func(w http.ResponseWriter, r *http.Request) {
+			path := strings.TrimPrefix(r.URL.Path, "/gallery/")
+			if path == "" {
+				path = "index.html"
+			}
+			if _, err := fs.Stat(galleryDist, path); err == nil {
+				http.StripPrefix("/gallery/", galleryFileServer).ServeHTTP(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for client-side routes
+			r.URL.Path = "/gallery/index.html"
 			http.StripPrefix("/gallery/", galleryFileServer).ServeHTTP(w, r)
-			return
-		}
-		// SPA fallback: serve index.html for client-side routes
-		r.URL.Path = "/gallery/index.html"
-		http.StripPrefix("/gallery/", galleryFileServer).ServeHTTP(w, r)
-	})
+		})
+	}
 
 	// Secrets
 	mux.HandleFunc("POST /api/secrets", h.SecretSet)

@@ -9,6 +9,7 @@ const configJSONTemplate = `{
     "dataDir": "/var/lib/openberth",
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
+    "webDisabled": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",
@@ -40,6 +41,7 @@ const configJSONCloudflareTemplate = `{
     "cloudflareProxy": true,
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
+    "webDisabled": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",
@@ -70,6 +72,7 @@ const configJSONInsecureTemplate = `{
     "insecure": true,
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
+    "webDisabled": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",
@@ -207,6 +210,7 @@ case "${1:-help}" in
         MAX=$(jq -r '.defaultMaxDeploys // 10' "$CONFIG")
         MEM=$(jq -r '.containerDefaults.memory // "512m"' "$CONFIG")
         CPUS=$(jq -r '.containerDefaults.cpus // "0.5"' "$CONFIG")
+        WEB_OFF=$(jq -r '.webDisabled // false' "$CONFIG")
         if [[ "$INSECURE" == "true" ]]; then
             TLS_MODE="Insecure (HTTP only)"
         elif [[ "$CF" == "true" ]]; then
@@ -214,9 +218,11 @@ case "${1:-help}" in
         else
             TLS_MODE="Direct (Let's Encrypt)"
         fi
+        if [[ "$WEB_OFF" == "true" ]]; then WEB="disabled"; else WEB="enabled"; fi
         echo "=== OpenBerth Config ==="
         echo "  Domain:          $DOMAIN"
         echo "  TLS mode:        $TLS_MODE"
+        echo "  Web dashboard:   $WEB"
         echo "  Default TTL:     ${TTL}h"
         echo "  Max deploys:     $MAX"
         echo "  Container mem:   $MEM"
@@ -232,6 +238,28 @@ case "${1:-help}" in
         sqlite3 "$DB" "UPDATE deployments SET locked = 0 WHERE id='$ID';"
         echo "Deployment '$ID' unlocked"
         ;;
+    web)
+        CONFIG="/var/lib/openberth/config.json"
+        [[ -f "$CONFIG" ]] || { echo "Config not found: $CONFIG"; exit 1; }
+        case "${2:-}" in
+            enable)
+                jq '.webDisabled = false' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+                systemctl restart openberth
+                echo "Web dashboard enabled. Server restarted."
+                ;;
+            disable)
+                jq '.webDisabled = true' "$CONFIG" > "$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+                systemctl restart openberth
+                echo "Web dashboard disabled. Server restarted."
+                echo "Note: 'berth login' (browser callback) will stop working. Use 'berth-admin user add' and distribute keys out-of-band."
+                ;;
+            status)
+                STATE=$(jq -r '.webDisabled // false' "$CONFIG")
+                if [[ "$STATE" == "true" ]]; then echo "Web: disabled"; else echo "Web: enabled"; fi
+                ;;
+            *) echo "Usage: berth-admin web {enable|disable|status}";;
+        esac
+        ;;
     *)
         echo "OpenBerth Admin"
         echo ""
@@ -243,5 +271,6 @@ case "${1:-help}" in
         echo "  berth-admin cleanup"
         echo "  berth-admin lock ID"
         echo "  berth-admin unlock ID"
+        echo "  berth-admin web {enable|disable|status}"
         ;;
 esac`

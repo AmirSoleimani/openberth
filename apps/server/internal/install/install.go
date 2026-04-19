@@ -47,6 +47,7 @@ type Config struct {
 	AdminPassword   string
 	CloudflareProxy bool
 	Insecure        bool
+	WebDisabled     bool
 	MaxDeploys      int
 	DefaultTTL      int
 }
@@ -314,7 +315,7 @@ func (p *provisioner) writeConfig() error {
 	} else if p.cfg.CloudflareProxy {
 		tmpl = configJSONCloudflareTemplate
 	}
-	content := fmt.Sprintf(tmpl, p.cfg.Domain, p.cfg.DefaultTTL, p.cfg.MaxDeploys)
+	content := fmt.Sprintf(tmpl, p.cfg.Domain, p.cfg.DefaultTTL, p.cfg.MaxDeploys, p.cfg.WebDisabled)
 	if err := writeFile(dataDir+"/config.json", content, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -581,6 +582,7 @@ func Run(args []string) {
 	fs.IntVar(&cfg.DefaultTTL, "default-ttl", 0, "Default TTL hours (default: 72)")
 	fs.BoolVar(&cfg.CloudflareProxy, "cloudflare", false, "Use Cloudflare proxy mode (no ACME, internal TLS)")
 	fs.BoolVar(&cfg.Insecure, "insecure", false, "Run without SSL/TLS (HTTP only)")
+	fs.BoolVar(&cfg.WebDisabled, "no-web", false, "Disable web gallery, login, and setup pages (API/CLI/OIDC-only mode)")
 
 	fs.Usage = func() {
 		fmt.Printf(`
@@ -600,6 +602,7 @@ func Run(args []string) {
     --default-ttl <hours>   Default TTL hours (default: 72)
     --cloudflare            Use Cloudflare proxy mode (no ACME, internal TLS)
     --insecure              Run without SSL/TLS (HTTP only)
+    --no-web                Disable web gallery, login, and setup pages
 `, cBold, cReset, cBold, cReset, cBold, cReset, cBold, cReset)
 	}
 

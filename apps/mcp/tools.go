@@ -582,7 +582,7 @@ func (s *MCPServer) tools() []Tool {
 					},
 					"global": map[string]interface{}{
 						"type":        "boolean",
-						"description": "If true, the secret is available to all users (admin only). Default false.",
+						"description": "If true, the secret is available to all users. Default false.",
 					},
 				},
 				"required": []string{"name", "value"},
@@ -608,7 +608,7 @@ func (s *MCPServer) tools() []Tool {
 					},
 					"global": map[string]interface{}{
 						"type":        "boolean",
-						"description": "If true, delete a global secret (admin only). Default false.",
+						"description": "If true, delete a global secret. Default false.",
 					},
 				},
 				"required": []string{"name"},

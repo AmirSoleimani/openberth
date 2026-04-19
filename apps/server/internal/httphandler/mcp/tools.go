@@ -261,7 +261,7 @@ func tools() []mcpTool {
 					"name":        map[string]interface{}{"type": "string", "description": "Secret name (used as the environment variable name)"},
 					"value":       map[string]interface{}{"type": "string", "description": "Secret value (encrypted at rest, never returned)"},
 					"description": map[string]interface{}{"type": "string", "description": "Human-readable description of the secret (optional)"},
-					"global":      map[string]interface{}{"type": "boolean", "description": "If true, the secret is available to all users (admin only, optional)"},
+					"global":      map[string]interface{}{"type": "boolean", "description": "If true, the secret is available to all users (optional, default false)"},
 				},
 				"required": []string{"name", "value"},
 			},
@@ -281,7 +281,7 @@ func tools() []mcpTool {
 				"type": "object",
 				"properties": map[string]interface{}{
 					"name":   map[string]interface{}{"type": "string", "description": "Secret name to delete"},
-					"global": map[string]interface{}{"type": "boolean", "description": "If true, delete a global secret (admin only, optional)"},
+					"global": map[string]interface{}{"type": "boolean", "description": "If true, delete a global secret (optional, default false)"},
 				},
 				"required": []string{"name"},
 			},

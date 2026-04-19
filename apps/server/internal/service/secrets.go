@@ -31,9 +31,6 @@ func (svc *Service) SecretSet(user *store.User, name, value, description string,
 	if value == "" {
 		return nil, ErrBadRequest("Secret value is required.")
 	}
-	if global && user.Role != "admin" {
-		return nil, ErrForbidden("Only admins can create global secrets.")
-	}
 
 	masterKey, err := svc.Cfg.GetMasterKeyBytes()
 	if err != nil {
@@ -50,21 +47,37 @@ func (svc *Service) SecretSet(user *store.User, name, value, description string,
 		userID = &user.ID
 	}
 
-	// Check if secret exists — and if so, ensure scope matches
-	existing, _ := svc.Store.GetSecret(user.ID, name)
+	// Check if an existing row would collide. When targeting a global, look up
+	// the global row directly — `GetSecret` prefers user-scoped over global
+	// when both exist, which would hide the real collision.
+	var existing *store.Secret
+	if global {
+		existing, _ = svc.Store.GetGlobalSecret(name)
+		// Also check if a user-scoped secret with the same name exists —
+		// that's a scope mismatch we need to reject below.
+		if existing == nil {
+			if userScoped, _ := svc.Store.GetSecret(user.ID, name); userScoped != nil && userScoped.UserID != nil {
+				return nil, ErrBadRequest(fmt.Sprintf("Secret %q already exists as a user secret. Remove --global to update it.", name))
+			}
+		}
+	} else {
+		existing, _ = svc.Store.GetSecret(user.ID, name)
+		if existing != nil && existing.UserID == nil {
+			return nil, ErrBadRequest(fmt.Sprintf("Secret %q already exists as a global secret. Use --global to update it.", name))
+		}
+	}
 	isUpdate := existing != nil
 
-	if isUpdate {
-		existingIsGlobal := existing.UserID == nil
-		if existingIsGlobal != global {
-			if existingIsGlobal {
-				return nil, ErrBadRequest(fmt.Sprintf("Secret %q already exists as a global secret. Use --global to update it.", name))
-			}
-			return nil, ErrBadRequest(fmt.Sprintf("Secret %q already exists as a user secret. Remove --global to update it.", name))
+	// Creator/admin gate for globals. User-scoped secrets are implicitly
+	// owned by the querying user (user_id scoped), so only globals need the
+	// CreatedBy check.
+	if isUpdate && global && user.Role != "admin" {
+		if existing.CreatedBy == nil || *existing.CreatedBy != user.ID {
+			return nil, ErrForbidden("Only the creator of this global secret (or an admin) can update it.")
 		}
 	}
 
-	if err := svc.Store.SetSecret(userID, scopeStr(global), name, description, encDEK, dekNonce, ciphertext, valNonce); err != nil {
+	if err := svc.Store.SetSecret(userID, scopeStr(global), name, description, user.ID, encDEK, dekNonce, ciphertext, valNonce); err != nil {
 		return nil, ErrInternal("Failed to store secret: " + err.Error())
 	}
 
@@ -184,8 +197,16 @@ func (svc *Service) SecretDelete(user *store.User, name string, global bool) err
 	if name == "" {
 		return ErrBadRequest("Secret name is required.")
 	}
+
+	// For global secrets, only the creator (or an admin) may delete.
 	if global && user.Role != "admin" {
-		return ErrForbidden("Only admins can delete global secrets.")
+		existing, _ := svc.Store.GetGlobalSecret(name)
+		if existing == nil {
+			return ErrNotFound("Secret not found.")
+		}
+		if existing.CreatedBy == nil || *existing.CreatedBy != user.ID {
+			return ErrForbidden("Only the creator of this global secret (or an admin) can delete it.")
+		}
 	}
 
 	var userID *string

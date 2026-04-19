@@ -17,6 +17,7 @@ type Secret struct {
 	DEKNonce     []byte
 	Ciphertext   []byte
 	ValueNonce   []byte
+	CreatedBy    *string // user ID of the original creator; NULL for pre-migration rows (legacy globals — admin-only)
 	CreatedAt    string
 	UpdatedAt    string
 }
@@ -29,11 +30,13 @@ type SecretMeta struct {
 	UpdatedAt   string `json:"updatedAt"`
 }
 
-// SetSecret upserts a secret. userID is nil for global scope.
-func (s *Store) SetSecret(userID *string, scope, name, description string, encDEK, dekNonce, ciphertext, valNonce []byte) error {
+// SetSecret upserts a secret. userID is nil for global scope. createdBy is the
+// user ID performing the creation; it is only written on INSERT and never
+// overwritten on UPDATE (so the original creator is preserved across rotations).
+func (s *Store) SetSecret(userID *string, scope, name, description, createdBy string, encDEK, dekNonce, ciphertext, valNonce []byte) error {
 	_, err := s.db.Exec(`
-		INSERT INTO secrets (user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO secrets (user_id, scope, name, description, created_by, encrypted_dek, dek_nonce, ciphertext, value_nonce, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(user_id, name) DO UPDATE SET
 			description = excluded.description,
 			encrypted_dek = excluded.encrypted_dek,
@@ -41,7 +44,7 @@ func (s *Store) SetSecret(userID *string, scope, name, description string, encDE
 			ciphertext = excluded.ciphertext,
 			value_nonce = excluded.value_nonce,
 			updated_at = CURRENT_TIMESTAMP`,
-		userID, scope, name, description, encDEK, dekNonce, ciphertext, valNonce,
+		userID, scope, name, description, createdBy, encDEK, dekNonce, ciphertext, valNonce,
 	)
 	return err
 }
@@ -51,12 +54,12 @@ func (s *Store) GetSecret(userID string, name string) (*Secret, error) {
 	sec := &Secret{}
 	// Try user-scoped first
 	err := s.db.QueryRow(`
-		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_at, updated_at
+		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_by, created_at, updated_at
 		FROM secrets WHERE user_id = ? AND name = ?`,
 		userID, name,
 	).Scan(&sec.ID, &sec.UserID, &sec.Scope, &sec.Name, &sec.Description,
 		&sec.EncryptedDEK, &sec.DEKNonce, &sec.Ciphertext, &sec.ValueNonce,
-		&sec.CreatedAt, &sec.UpdatedAt)
+		&sec.CreatedBy, &sec.CreatedAt, &sec.UpdatedAt)
 	if err == nil {
 		return sec, nil
 	}
@@ -66,12 +69,29 @@ func (s *Store) GetSecret(userID string, name string) (*Secret, error) {
 
 	// Fall back to global
 	err = s.db.QueryRow(`
-		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_at, updated_at
+		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_by, created_at, updated_at
 		FROM secrets WHERE user_id IS NULL AND name = ?`,
 		name,
 	).Scan(&sec.ID, &sec.UserID, &sec.Scope, &sec.Name, &sec.Description,
 		&sec.EncryptedDEK, &sec.DEKNonce, &sec.Ciphertext, &sec.ValueNonce,
-		&sec.CreatedAt, &sec.UpdatedAt)
+		&sec.CreatedBy, &sec.CreatedAt, &sec.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return sec, err
+}
+
+// GetGlobalSecret returns the global secret with the given name, or nil if none.
+// Distinct from GetSecret, which prefers user-scoped over global when both exist.
+func (s *Store) GetGlobalSecret(name string) (*Secret, error) {
+	sec := &Secret{}
+	err := s.db.QueryRow(`
+		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_by, created_at, updated_at
+		FROM secrets WHERE user_id IS NULL AND name = ?`,
+		name,
+	).Scan(&sec.ID, &sec.UserID, &sec.Scope, &sec.Name, &sec.Description,
+		&sec.EncryptedDEK, &sec.DEKNonce, &sec.Ciphertext, &sec.ValueNonce,
+		&sec.CreatedBy, &sec.CreatedAt, &sec.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -139,7 +159,7 @@ func (s *Store) GetSecretsByNames(userID string, names []string) ([]Secret, erro
 	// Use a window function to rank user-scoped over global for duplicate names.
 	// ROW_NUMBER partitioned by name, ordered so user-scoped (non-null user_id) comes first.
 	query := fmt.Sprintf(`
-		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_at, updated_at
+		SELECT id, user_id, scope, name, description, encrypted_dek, dek_nonce, ciphertext, value_nonce, created_by, created_at, updated_at
 		FROM (
 			SELECT *, ROW_NUMBER() OVER (
 				PARTITION BY name
@@ -161,7 +181,7 @@ func (s *Store) GetSecretsByNames(userID string, names []string) ([]Secret, erro
 		var sec Secret
 		if err := rows.Scan(&sec.ID, &sec.UserID, &sec.Scope, &sec.Name, &sec.Description,
 			&sec.EncryptedDEK, &sec.DEKNonce, &sec.Ciphertext, &sec.ValueNonce,
-			&sec.CreatedAt, &sec.UpdatedAt); err != nil {
+			&sec.CreatedBy, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
 			return nil, err
 		}
 		secrets = append(secrets, sec)

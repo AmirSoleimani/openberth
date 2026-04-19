@@ -395,6 +395,7 @@ Add a version file (`.nvmrc`, `.python-version`) or check `berth logs <id>` to s
 - [CLI Reference](docs/cli-reference.md) — all commands, flags, env vars, stdin pipe
 - [AI Integration](docs/ai-integration.md) — HTTP API, MCP server, stdin pipe
 - [Managing Users](docs/managing-users.md) — admin CLI, admin HTTP API, OIDC, settings
+- [Endpoints & Access Matrix](docs/endpoints.md) — full list of HTTP endpoints and who can call each
 - [Persistent Data](docs/persistent-data.md) — `/data` directory and `/_data/*` REST API
 - [Architecture](docs/architecture.md) — two-phase builds, blue-green deploys, security, internals
 

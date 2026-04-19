@@ -183,6 +183,7 @@ func (s *Store) ensureSchema() error {
 		dek_nonce BLOB NOT NULL,
 		ciphertext BLOB NOT NULL,
 		value_nonce BLOB NOT NULL,
+		created_by TEXT REFERENCES users(id),
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(user_id, name)
@@ -191,6 +192,9 @@ func (s *Store) ensureSchema() error {
 
 	// Migration: add secrets_json to deployments
 	s.db.Exec("ALTER TABLE deployments ADD COLUMN secrets_json TEXT DEFAULT '[]'")
+
+	// Migration: add created_by to secrets (pre-existing rows stay NULL → admin-only edit).
+	s.db.Exec("ALTER TABLE secrets ADD COLUMN created_by TEXT REFERENCES users(id)")
 
 	return nil
 }

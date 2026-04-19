@@ -114,11 +114,39 @@ func (h *Handlers) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := r.PathValue("name")
-	deleted, _ := h.svc.Store.DeleteUser(name)
-	if !deleted {
+	target, _ := h.svc.Store.GetUserByName(name)
+	if target == nil {
 		jsonErr(w, 404, "User not found.")
 		return
 	}
+
+	// Refuse if the user still owns resources. Admins must destroy deployments,
+	// delete user secrets, and delete/reassign globals they created before
+	// removing the user. Ephemeral auth state (sessions, oauth codes/tokens,
+	// login codes) is cleaned up automatically on success.
+	deployments, _ := h.svc.Store.CountActiveDeployments(target.ID)
+	userSecrets, _ := h.svc.Store.CountUserSecrets(target.ID)
+	createdGlobals, _ := h.svc.Store.CountGlobalsCreatedBy(target.ID)
+
+	if deployments > 0 || userSecrets > 0 || createdGlobals > 0 {
+		jsonResp(w, 409, map[string]interface{}{
+			"error":          "User has associated resources. Remove them first.",
+			"deployments":    deployments,
+			"userSecrets":    userSecrets,
+			"createdGlobals": createdGlobals,
+		})
+		return
+	}
+
+	if err := h.svc.Store.DeleteUserAuthState(target.ID); err != nil {
+		jsonErr(w, 500, "Failed to clear auth state: "+err.Error())
+		return
+	}
+	if _, err := h.svc.Store.DeleteUser(name); err != nil {
+		jsonErr(w, 500, "Failed to delete user: "+err.Error())
+		return
+	}
+	log.Printf("[admin] User '%s' deleted", name)
 	jsonResp(w, 200, map[string]string{"deleted": name})
 }
 

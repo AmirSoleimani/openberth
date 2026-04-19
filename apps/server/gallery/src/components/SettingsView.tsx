@@ -120,11 +120,25 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
   };
 
   const handleDeleteUser = async (name: string) => {
-    await fetch(`/api/admin/users/${encodeURIComponent(name)}`, {
+    if (!window.confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(name)}`, {
       method: "DELETE",
       headers: authHeaders(apiKey),
       credentials: "same-origin",
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        const parts: string[] = [];
+        if (body.deployments) parts.push(`${body.deployments} deployment(s)`);
+        if (body.userSecrets) parts.push(`${body.userSecrets} user secret(s)`);
+        if (body.createdGlobals) parts.push(`${body.createdGlobals} global secret(s) they created`);
+        window.alert(`Cannot delete "${name}": user still owns ${parts.join(", ")}. Remove them first, then try again.`);
+      } else {
+        window.alert(body.error || `Failed to delete user (HTTP ${res.status}).`);
+      }
+      return;
+    }
     fetchAdminData();
   };
 

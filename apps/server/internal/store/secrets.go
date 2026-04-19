@@ -81,6 +81,20 @@ func (s *Store) GetSecret(userID string, name string) (*Secret, error) {
 	return sec, err
 }
 
+// CountUserSecrets returns the number of user-scoped secrets owned by a user.
+func (s *Store) CountUserSecrets(userID string) (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM secrets WHERE user_id = ?", userID).Scan(&count)
+	return count, err
+}
+
+// CountGlobalsCreatedBy returns the number of global secrets originally created by a user.
+func (s *Store) CountGlobalsCreatedBy(userID string) (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM secrets WHERE user_id IS NULL AND created_by = ?", userID).Scan(&count)
+	return count, err
+}
+
 // GetGlobalSecret returns the global secret with the given name, or nil if none.
 // Distinct from GetSecret, which prefers user-scoped over global when both exist.
 func (s *Store) GetGlobalSecret(name string) (*Secret, error) {

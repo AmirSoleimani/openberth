@@ -328,6 +328,26 @@ func (s *Store) DeleteUser(name string) (bool, error) {
 	return n > 0, nil
 }
 
+// DeleteUserAuthState removes sessions, OAuth codes, OAuth tokens, and login codes for a user.
+// These don't count as "resources" an admin needs to clean up manually before deletion —
+// they're ephemeral auth state that should be nuked alongside the user row.
+// Sessions have a FK to users, so this must run before the user row is deleted.
+// The other three tables have no FK, so they'd orphan otherwise.
+func (s *Store) DeleteUserAuthState(userID string) error {
+	stmts := []string{
+		"DELETE FROM sessions WHERE user_id = ?",
+		"DELETE FROM oauth_codes WHERE user_id = ?",
+		"DELETE FROM oauth_tokens WHERE user_id = ?",
+		"DELETE FROM login_codes WHERE user_id = ?",
+	}
+	for _, stmt := range stmts {
+		if _, err := s.db.Exec(stmt, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ── Deployments ────────────────────────────────────────────────────────
 
 func (s *Store) CreateDeployment(d *Deployment) error {

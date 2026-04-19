@@ -351,6 +351,24 @@ func (h *Handlers) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, 200, map[string]string{"message": "Password updated."})
 }
 
+// ── Rotate API Key ───────────────────────────────────────────────
+
+func (h *Handlers) RotateAPIKey(w http.ResponseWriter, r *http.Request) {
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+
+	newKey := "sc_" + service.RandomHex(24)
+	if err := h.svc.Store.UpdateUserAPIKey(user.ID, newKey); err != nil {
+		jsonErr(w, 500, "Failed to rotate API key.")
+		return
+	}
+
+	log.Printf("[rotate-key] User '%s' rotated API key", user.Name)
+	jsonResp(w, 200, map[string]string{"apiKey": newKey})
+}
+
 func setupError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(400)

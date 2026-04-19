@@ -71,6 +71,7 @@ func printHelp() {
     backup              Download full server backup (admin)
     restore <file>      Restore server from backup file (admin)
     login               Login via browser (sets up API key automatically)
+    rotate-key          Rotate your API key (invalidates the current one)
     config              Manage CLI configuration
     upgrade             Upgrade the CLI to the latest version
     version             Show CLI and server version
@@ -208,6 +209,8 @@ func main() {
 		cmdRestore()
 	case "login":
 		cmdLogin()
+	case "rotate-key":
+		cmdRotateKey()
 	case "config":
 		cmdConfig()
 	case "upgrade":

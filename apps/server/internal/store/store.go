@@ -304,6 +304,11 @@ func (s *Store) UpdateUserDisplayName(userID, displayName string) error {
 	return err
 }
 
+func (s *Store) UpdateUserAPIKey(userID, apiKey string) error {
+	_, err := s.db.Exec("UPDATE users SET api_key = ? WHERE id = ?", apiKey, userID)
+	return err
+}
+
 func (s *Store) CountUsers() (int, error) {
 	var count int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)

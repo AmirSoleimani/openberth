@@ -79,6 +79,7 @@ func main() {
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/login/exchange", h.LoginExchange)
 	mux.HandleFunc("POST /api/me/password", h.ChangePassword)
+	mux.HandleFunc("POST /api/me/rotate-key", h.RotateAPIKey)
 
 	// OIDC/SSO
 	mux.HandleFunc("GET /auth/oidc/start", h.OIDCStart)

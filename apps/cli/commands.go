@@ -1375,6 +1375,46 @@ type loginResult struct {
 	err    error
 }
 
+// ── Rotate API Key ──────────────────────────────────────────────────
+
+func cmdRotateKey() {
+	fmt.Println()
+	fmt.Printf("  %s⚓ OpenBerth Rotate Key%s\n\n", cBold, cReset)
+
+	client, err := NewAPIClient()
+	if err != nil {
+		fail(err.Error())
+		os.Exit(1)
+	}
+
+	spin("Rotating API key")
+	result, err := client.RequestJSON("POST", "/api/me/rotate-key", map[string]string{})
+	done()
+	if err != nil {
+		fail(err.Error())
+		os.Exit(1)
+	}
+
+	newKey, _ := result["apiKey"].(string)
+	if newKey == "" {
+		fail("Server did not return a new API key.")
+		os.Exit(1)
+	}
+
+	cfg := loadCLIConfig()
+	cfg.Key = newKey
+	if err := saveCLIConfig(cfg); err != nil {
+		fail("Rotated server-side, but failed to update ~/.berth.json: " + err.Error())
+		info(fmt.Sprintf("New key: %s%s%s", cBold, newKey, cReset))
+		os.Exit(1)
+	}
+
+	ok("API key rotated. Old key is now invalid.")
+	info(fmt.Sprintf("New key: %s%s%s", cBold, newKey, cReset))
+	warn("Any other machines using the old key must be updated (`berth config set key <new>` or `berth login`).")
+	fmt.Println()
+}
+
 func openBrowser(url string) error {
 	switch runtime.GOOS {
 	case "darwin":

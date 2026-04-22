@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -125,6 +126,51 @@ func (c *APIClient) Upload(path, tarballPath string, fields map[string][]string)
 	return result, nil
 }
 
+// PostDownload sends an authenticated POST with a JSON body and streams the
+// response body to outputFile. Used for /api/admin/backup which requires
+// a passphrase in the request body.
+func (c *APIClient) PostDownload(path string, body any, outputFile string) (int64, error) {
+	url := c.server + path
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.key)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		if json.Unmarshal(b, &result) == nil {
+			if errMsg, ok := result["error"].(string); ok {
+				return 0, fmt.Errorf("%s", errMsg)
+			}
+		}
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return 0, fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+	n, err := io.Copy(f, resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("download: %w", err)
+	}
+	return n, nil
+}
+
 // Download makes an authenticated GET request and streams the response to a file.
 func (c *APIClient) Download(path, outputFile string) (int64, error) {
 	url := c.server + path
@@ -166,6 +212,13 @@ func (c *APIClient) Download(path, outputFile string) (int64, error) {
 
 // UploadFile sends a single file as multipart upload.
 func (c *APIClient) UploadFile(apiPath, filePath, fieldName string) (map[string]interface{}, error) {
+	return c.UploadFileWithFields(apiPath, filePath, fieldName, nil)
+}
+
+// UploadFileWithFields is like UploadFile but accepts extra string form
+// fields that are written into the multipart before the file. Used by
+// admin restore to carry the passphrase alongside the archive.
+func (c *APIClient) UploadFileWithFields(apiPath, filePath, fieldName string, fields map[string]string) (map[string]interface{}, error) {
 	url := c.server + apiPath
 
 	pr, pw := io.Pipe()
@@ -174,6 +227,13 @@ func (c *APIClient) UploadFile(apiPath, filePath, fieldName string) (map[string]
 	go func() {
 		defer pw.Close()
 		defer writer.Close()
+
+		for k, v := range fields {
+			if err := writer.WriteField(k, v); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
 
 		part, err := writer.CreateFormFile(fieldName, filepath.Base(filePath))
 		if err != nil {

@@ -2,7 +2,9 @@ package httphandler
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -270,9 +272,24 @@ func (h *Handlers) AdminSetSettings(w http.ResponseWriter, r *http.Request) {
 
 // ── Admin: Backup ──────────────────────────────────────────────────
 
+// AdminBackup streams a full instance backup as an encrypted tarball.
+// The caller must supply a passphrase in the POST body ({"passphrase":"..."}).
+// Argon2id-derived key; AES-256-GCM; see service/backup.go for wire format.
 func (h *Handlers) AdminBackup(w http.ResponseWriter, r *http.Request) {
 	user := h.requireAdmin(w, r)
 	if user == nil {
+		return
+	}
+
+	var body struct {
+		Passphrase string `json:"passphrase"`
+	}
+	if err := decodeJSONBody(r, &body); err != nil && err != io.EOF {
+		jsonErr(w, 400, "Invalid JSON body.")
+		return
+	}
+	if err := service.ValidateBackupPassphrase(body.Passphrase); err != nil {
+		jsonErr(w, 400, err.Error())
 		return
 	}
 
@@ -285,11 +302,26 @@ func (h *Handlers) AdminBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set response headers for streaming download
-	filename := fmt.Sprintf("openberth-backup-%s.tar.gz", time.Now().Format("2006-01-02"))
-	w.Header().Set("Content-Type", "application/gzip")
+	filename := fmt.Sprintf("openberth-backup-%s.obbk", time.Now().Format("2006-01-02"))
+	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 
-	gz := gzip.NewWriter(w)
+	aad := service.BackupAAD{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		AdminUser: user.Name,
+		Version:   h.version,
+	}
+	wrapped, err := service.WrapBackup(w, body.Passphrase, aad)
+	if err != nil {
+		// Header already sent? Best effort — log and bail.
+		log.Printf("[backup] wrap failed: %v", err)
+		return
+	}
+	// Close flushes the final GCM block. Separate defer from the writers
+	// above so the tar/gz writers flush first.
+	defer wrapped.Close()
+
+	gz := gzip.NewWriter(wrapped)
 	defer gz.Close()
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
@@ -308,7 +340,7 @@ func (h *Handlers) AdminBackup(w http.ResponseWriter, r *http.Request) {
 	// Add persist/ tree
 	addDirToTar(tw, filepath.Join(dataDir, "persist"), "persist")
 
-	log.Printf("[backup] Backup streamed to admin user %s", user.Name)
+	log.Printf("[backup] Encrypted backup streamed to admin user %s", user.Name)
 }
 
 // addFileToTar adds a single file to a tar archive.
@@ -396,6 +428,31 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	passphrase := r.FormValue("passphrase")
+	legacy := r.FormValue("legacyUnencrypted") == "true"
+
+	// Detect the backup format and unwrap if needed. The unwrapped reader
+	// then feeds the normal ExtractBackup gzip/tar pipeline.
+	var archive io.Reader
+	plain, _, uErr := service.UnwrapBackup(file, passphrase)
+	if uErr == nil {
+		archive = plain
+	} else {
+		var legacyErr *service.LegacyUnencryptedBackupError
+		if errors.As(uErr, &legacyErr) {
+			if !legacy {
+				jsonErr(w, 400, "This backup is in the pre-passphrase format. Resubmit with form field legacyUnencrypted=true to accept it (upgrade operators are prompted once during the transition).")
+				return
+			}
+			log.Printf("[restore] Accepting legacy unencrypted backup (admin=%s)", user.Name)
+			// Re-prepend the already-consumed prefix bytes.
+			archive = io.MultiReader(bytes.NewReader(legacyErr.Prefix()), file)
+		} else {
+			jsonErr(w, 400, "Failed to unwrap backup: "+uErr.Error())
+			return
+		}
+	}
+
 	// 1. Stop all running containers
 	deploys, _ := h.svc.Store.ListDeploymentsByStatus("running", "building", "updating")
 	for _, d := range deploys {
@@ -411,7 +468,7 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Extract archive into dataDir
 	dataDir := h.svc.Cfg.DataDir
-	if err := service.ExtractBackup(file, dataDir, h.svc.Cfg.MaxBackupBytes, h.svc.Cfg.MaxBackupEntries); err != nil {
+	if err := service.ExtractBackup(archive, dataDir, h.svc.Cfg.MaxBackupBytes, h.svc.Cfg.MaxBackupEntries); err != nil {
 		// Try to reopen store even on error
 		h.svc.Store.Reopen(h.svc.Cfg.DBPath)
 		jsonErr(w, 500, "Failed to extract backup: "+err.Error())

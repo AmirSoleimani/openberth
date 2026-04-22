@@ -166,6 +166,101 @@ func (svc *Service) ListDeployments(user *store.User, ownerFilter string) ([]Dep
 
 // ── Get Source ───────────────────────────────────────────────────────
 
+// sourceAllowBasenames is the set of filenames that always return their
+// real contents, even if they would otherwise match sourceDenyBasenames
+// or sourceDenyGlobs. Sample / example / template env files are
+// intentionally readable — they're shipped as documentation.
+var sourceAllowBasenames = map[string]bool{
+	".env.example":    true,
+	".env.sample":     true,
+	".env.template":   true,
+	".env.dist":       true,
+	"env.example":     true,
+	"env.sample":      true,
+	"env.template":    true,
+	"env.dist":        true,
+}
+
+// sourceDenyBasenames matches exact basenames of files whose content must
+// not be returned via GetSource — they commonly hold secrets, credentials,
+// or private keys.
+var sourceDenyBasenames = map[string]bool{
+	".env":                 true,
+	".env.local":           true,
+	".env.development":     true,
+	".env.production":      true,
+	".env.staging":         true,
+	".env.test":            true,
+	".env.development.local": true,
+	".env.production.local":  true,
+	".env.test.local":        true,
+	"secrets.json":         true,
+	"secrets.yaml":         true,
+	"secrets.yml":          true,
+	"credentials":          true,
+	"kubeconfig":           true,
+	"terraform.tfstate":    true,
+	"terraform.tfstate.backup": true,
+	"gcloud-service-key.json":  true,
+	".netrc":               true,
+	".pgpass":              true,
+	"id_rsa":               true,
+	"id_dsa":               true,
+	"id_ecdsa":             true,
+	"id_ed25519":           true,
+}
+
+// sourceDenyGlobs are filepath.Match patterns applied to the basename when
+// no exact match is found. Captures extensions (*.pem, *.key, *.kubeconfig)
+// and prefixed families (firebase-admin*.json, service-account*.json).
+var sourceDenyGlobs = []string{
+	"*.pem", "*.key", "*.crt", "*.p12", "*.pfx",
+	"*.kubeconfig",
+	"firebase-admin*.json",
+	"service-account*.json",
+	"id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
+}
+
+// sourceDenyPathPrefixes match against the path relative to the deploy
+// root — these are directory-qualified secrets (.aws/credentials etc.).
+var sourceDenyPathPrefixes = []string{
+	".aws/credentials",
+	".aws/config",
+	".kube/config",
+	".ssh/",
+	".gnupg/",
+}
+
+// redactedSourceFile is the placeholder content returned in place of a
+// file whose basename/path matches a deny pattern. Kept short and
+// actionable so client tools / UIs surface it clearly.
+func redactedSourceFile(rel, reason string) string {
+	return "[redacted by openberth: " + rel + " matches sensitive-file pattern '" + reason + "']"
+}
+
+// sourceMatchDeny returns the matched pattern name when rel is sensitive,
+// or "" when it's safe to include. The allow list wins over the deny list.
+func sourceMatchDeny(rel string) string {
+	base := filepath.Base(rel)
+	if sourceAllowBasenames[base] {
+		return ""
+	}
+	for _, p := range sourceDenyPathPrefixes {
+		if strings.HasPrefix(rel, p) {
+			return p
+		}
+	}
+	if sourceDenyBasenames[base] {
+		return base
+	}
+	for _, glob := range sourceDenyGlobs {
+		if ok, _ := filepath.Match(glob, base); ok {
+			return glob
+		}
+	}
+	return ""
+}
+
 func (svc *Service) GetSource(user *store.User, id string) (*SourceResult, error) {
 	deploy, _ := svc.Store.GetDeployment(id)
 	if deploy == nil {
@@ -189,6 +284,14 @@ func (svc *Service) GetSource(user *store.User, id string) (*SourceResult, error
 		if strings.HasPrefix(rel, ".openberth") {
 			return nil
 		}
+
+		// Redact sensitive files before reading their content so an oversized
+		// secret file (e.g. a multi-MB PEM) doesn't even get buffered.
+		if match := sourceMatchDeny(rel); match != "" {
+			files[rel] = redactedSourceFile(rel, match)
+			return nil
+		}
+
 		if info.Size() > 5*1024*1024 {
 			return nil
 		}

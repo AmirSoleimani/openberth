@@ -29,6 +29,8 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
   const [networkQuotaEnabled, setNetworkQuotaEnabled] = useState(false);
   const [networkDefaultQuota, setNetworkDefaultQuota] = useState("");
   const [networkResetInterval, setNetworkResetInterval] = useState("");
+  const [containerDefaultMemory, setContainerDefaultMemory] = useState("");
+  const [containerDefaultCpus, setContainerDefaultCpus] = useState("");
 
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [editUserTarget, setEditUserTarget] = useState<UserInfo | null>(null);
@@ -53,6 +55,8 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
         setNetworkQuotaEnabled(data["network.quota_enabled"] === "true");
         setNetworkDefaultQuota(data["network.default_quota"] || "");
         setNetworkResetInterval(data["network.quota_reset_interval"] || "");
+        setContainerDefaultMemory(data["container.default_memory"] || "");
+        setContainerDefaultCpus(data["container.default_cpus"] || "");
       })
       .catch(() => {});
   }, [apiKey]);
@@ -94,6 +98,24 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
           "network.quota_enabled": networkQuotaEnabled ? "true" : "false",
           "network.default_quota": networkDefaultQuota,
           "network.quota_reset_interval": networkResetInterval,
+        }),
+      });
+      fetchAdminData();
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleSaveContainerSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(apiKey) },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          "container.default_memory": containerDefaultMemory,
+          "container.default_cpus": containerDefaultCpus,
         }),
       });
       fetchAdminData();
@@ -175,6 +197,7 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
           <TabsTrigger value="oidc">OIDC / SSO</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
+          <TabsTrigger value="containers">Containers</TabsTrigger>
         </TabsList>
         <TabsContent value="oidc" className="pt-4">
           <div className="grid gap-8 lg:grid-cols-[1fr,1fr]">
@@ -320,6 +343,44 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
               </>
             )}
             <Button onClick={handleSaveNetworkSettings} disabled={settingsSaving}>{settingsSaving ? "Saving..." : "Save Network Settings"}</Button>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="containers" className="space-y-4 pt-4">
+          <div className="max-w-lg space-y-6">
+            <div className="rounded-md border bg-muted/50 p-4 text-sm space-y-2">
+              <p className="font-medium">Default Container Resources</p>
+              <p className="text-muted-foreground">
+                Applied to every new deployment that doesn't specify its own memory or CPU limits.
+                Per-deployment values (passed at deploy time) always win. Leaving a field empty
+                falls back to the server's compiled-in default.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="container-memory">Default memory</Label>
+              <Input
+                id="container-memory"
+                value={containerDefaultMemory}
+                onChange={(e) => setContainerDefaultMemory(e.target.value)}
+                placeholder="e.g. 512m, 1g, 2g"
+              />
+              <p className="text-xs text-muted-foreground">
+                Docker memory format. Use <code className="bg-muted px-1 rounded">m</code> for megabytes, <code className="bg-muted px-1 rounded">g</code> for gigabytes.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="container-cpus">Default CPUs</Label>
+              <Input
+                id="container-cpus"
+                value={containerDefaultCpus}
+                onChange={(e) => setContainerDefaultCpus(e.target.value)}
+                placeholder="e.g. 0.5, 1.0, 2.0"
+              />
+              <p className="text-xs text-muted-foreground">
+                Fractional CPU allocation per container. <code className="bg-muted px-1 rounded">1.0</code> = one full core.
+              </p>
+            </div>
+            <Button onClick={handleSaveContainerSettings} disabled={settingsSaving}>{settingsSaving ? "Saving..." : "Save Container Defaults"}</Button>
           </div>
         </TabsContent>
       </Tabs>

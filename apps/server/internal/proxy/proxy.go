@@ -82,6 +82,9 @@ func (p *ProxyManager) buildSiteConfig(fqdn, authBlock, subdomain string, hostPo
     header {
         X-OpenBerth-Deploy %s
         -Server
+        ?X-Content-Type-Options "nosniff"
+        ?X-Frame-Options "SAMEORIGIN"
+        ?Referrer-Policy "no-referrer"
     }
 }
 `, siteAddr, tlsDirective, authBlock, p.cfg.CaddyAccessLog, p.cfg.Port, hostPort, subdomain)

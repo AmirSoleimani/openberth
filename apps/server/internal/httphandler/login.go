@@ -6,6 +6,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,9 +19,24 @@ import (
 // ── Redirect validation ──────────────────────────────────────────
 
 // isLocalRedirect returns true if the URL is a relative path (e.g. "/gallery/").
-// Rejects absolute URLs, protocol-relative URLs (//evil.com), and empty strings.
+// Rejects absolute URLs, protocol-relative URLs (//evil.com, /\evil.com),
+// URLs containing backslashes (some browsers normalize to /), and anything
+// that parses with a host or scheme.
 func isLocalRedirect(u string) bool {
-	return u != "" && u[0] == '/' && (len(u) == 1 || u[1] != '/')
+	if u == "" || u[0] != '/' {
+		return false
+	}
+	if strings.HasPrefix(u, "//") || strings.HasPrefix(u, "/\\") {
+		return false
+	}
+	if strings.ContainsRune(u, '\\') {
+		return false
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host != "" || parsed.Scheme != "" {
+		return false
+	}
+	return true
 }
 
 // isAllowedCallback returns true if the callback URL is safe for the CLI OAuth flow.

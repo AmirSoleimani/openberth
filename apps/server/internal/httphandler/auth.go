@@ -4,12 +4,43 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
 	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
+
+// validSubdomain matches the format emitted by SanitizeName: lowercase
+// alphanumerics and hyphens, up to 63 characters. AuthCheck rebuilds the
+// tenant URL from the ?subdomain query param, so this check is a trust
+// boundary between Caddy's forward_auth and the redirect we emit.
+var validSubdomain = regexp.MustCompile(`^[a-z0-9-]{1,63}$`)
+
+// sanitizeForwardedURI keeps only the path + query portion of a tenant-
+// controlled X-Forwarded-Uri. Falls back to "/" on anything malformed —
+// scheme, host, protocol-relative, or backslashed input.
+func sanitizeForwardedURI(u string) string {
+	if u == "" || u[0] != '/' {
+		return "/"
+	}
+	if strings.HasPrefix(u, "//") || strings.ContainsRune(u, '\\') {
+		return "/"
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host != "" || parsed.Scheme != "" {
+		return "/"
+	}
+	out := parsed.Path
+	if out == "" {
+		out = "/"
+	}
+	if parsed.RawQuery != "" {
+		out += "?" + parsed.RawQuery
+	}
+	return out
+}
 
 // ── CORS ─────────────────────────────────────────────────────────────
 
@@ -142,26 +173,36 @@ func (h *Handlers) clearSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // AuthCheck is used by Caddy forward_auth for SSO-protected deployments.
+//
+// The trusted identifier of which deployment is asking is the ?subdomain
+// query param — set by our Caddy forward_auth template, not by the
+// user-agent. X-Forwarded-Host / X-Forwarded-Proto come from the tenant's
+// own request and must not be trusted when building the post-login return
+// URL (that would let an attacker craft a login page whose redirect points
+// to an external domain).
 func (h *Handlers) AuthCheck(w http.ResponseWriter, r *http.Request) {
+	subdomain := r.URL.Query().Get("subdomain")
+	if !validSubdomain.MatchString(subdomain) {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
 	user := h.Authenticate(r)
 	if user != nil {
-		subdomain := r.URL.Query().Get("subdomain")
-		if subdomain != "" {
-			deploy, _ := h.svc.Store.GetDeploymentBySubdomain(subdomain)
-			if deploy != nil && deploy.AccessUsers != "" {
-				if !service.CanMutateDeploy(deploy, user) {
-					allowed := strings.Split(deploy.AccessUsers, ",")
-					found := false
-					for _, u := range allowed {
-						if strings.TrimSpace(u) == user.Name {
-							found = true
-							break
-						}
+		deploy, _ := h.svc.Store.GetDeploymentBySubdomain(subdomain)
+		if deploy != nil && deploy.AccessUsers != "" {
+			if !service.CanMutateDeploy(deploy, user) {
+				allowed := strings.Split(deploy.AccessUsers, ",")
+				found := false
+				for _, u := range allowed {
+					if strings.TrimSpace(u) == user.Name {
+						found = true
+						break
 					}
-					if !found {
-						http.Error(w, "Forbidden", http.StatusForbidden)
-						return
-					}
+				}
+				if !found {
+					http.Error(w, "Forbidden", http.StatusForbidden)
+					return
 				}
 			}
 		}
@@ -170,16 +211,14 @@ func (h *Handlers) AuthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		scheme = "https"
+	// Build the return URL from the trusted subdomain + a sanitized path,
+	// never from X-Forwarded-Host.
+	scheme := "https"
+	if h.svc.Cfg.Insecure {
+		scheme = "http"
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	uri := r.Header.Get("X-Forwarded-Uri")
-	originalURL := scheme + "://" + host + uri
+	uri := sanitizeForwardedURI(r.Header.Get("X-Forwarded-Uri"))
+	originalURL := scheme + "://" + subdomain + "." + h.svc.Cfg.Domain + uri
 
 	loginURL := h.svc.Cfg.BaseURL + "/login?redirect=" + url.QueryEscape(originalURL)
 	http.Redirect(w, r, loginURL, http.StatusTemporaryRedirect)

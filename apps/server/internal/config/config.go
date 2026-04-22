@@ -56,6 +56,14 @@ type Config struct {
 	MaxBackupBytes   int64 `json:"maxBackupBytes,omitempty"`
 	MaxBackupEntries int   `json:"maxBackupEntries,omitempty"`
 
+	// LegacyBuildSecrets restores the pre-hardening behavior where user
+	// secrets were injected into the build container as env vars. Leaks
+	// those values to any postinstall script in any dependency. Deprecated:
+	// this flag will be removed in a future release — tenants should move
+	// any build-time secret usage to runtime, or petition for a dedicated
+	// build-secrets opt-in mechanism.
+	LegacyBuildSecrets bool `json:"legacyBuildSecrets,omitempty"`
+
 	// Derived paths
 	DeploysDir     string `json:"-"`
 	UploadsDir     string `json:"-"`

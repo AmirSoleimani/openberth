@@ -186,7 +186,15 @@ func (d *Driver) runBuild(opts runtime.DeployOpts, volumeName string, oldVolume 
 	for k, v := range opts.FrameworkEnv {
 		buildArgs = append(buildArgs, "-e="+k+"="+v)
 	}
-	for k, v := range opts.UserEnv {
+	// BuildEnv is the sanitized build-phase env (explicit user env without
+	// resolved secret values). Fall back to UserEnv for legacy callers that
+	// predate the split — tolerable because those callers are all in-tree
+	// and being migrated; a future release removes the fallback.
+	buildEnv := opts.BuildEnv
+	if buildEnv == nil {
+		buildEnv = opts.UserEnv
+	}
+	for k, v := range buildEnv {
 		buildArgs = append(buildArgs, "-e="+k+"="+v)
 	}
 

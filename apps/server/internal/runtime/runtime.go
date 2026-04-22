@@ -80,6 +80,12 @@ type Runtime interface {
 // DeployOpts bundles everything a driver needs to build and run an instance.
 // It mirrors the former container.CreateOpts but lives in the runtime
 // package so the interface has no Docker-specific leakage.
+//
+// BuildEnv vs UserEnv: BuildEnv is what the build phase sees (no resolved
+// secret values — they don't belong in build.log or in postinstall scripts).
+// UserEnv is the full runtime environment including resolved secrets. If
+// BuildEnv is nil, callers that haven't been updated for the split get the
+// legacy behavior (build sees everything).
 type DeployOpts struct {
 	ID           string
 	UserID       string
@@ -94,7 +100,8 @@ type DeployOpts struct {
 	InstallCmd   string // custom install override from .berth.json
 	CacheDir     string // language cache path to preserve across rebuilds
 	FrameworkEnv map[string]string
-	UserEnv      map[string]string
+	BuildEnv     map[string]string // env visible only during the build phase (no resolved secrets)
+	UserEnv      map[string]string // env visible at runtime (includes resolved secrets)
 	Memory       string
 	CPUs         string
 	NetworkQuota string // per-deploy override; empty = driver/config default
@@ -112,7 +119,8 @@ type SandboxOpts struct {
 	Port         int
 	Image        string // e.g. node:20-slim
 	FrameworkEnv map[string]string
-	UserEnv      map[string]string
+	BuildEnv     map[string]string // build-time env (no resolved secret values)
+	UserEnv      map[string]string // runtime env (includes resolved secrets)
 	Memory       string
 	NetworkQuota string
 }

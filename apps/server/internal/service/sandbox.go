@@ -47,7 +47,7 @@ func (svc *Service) CreateSandbox(user *store.User, p SandboxCreateParams) (*Dep
 	ttlHours := ParseTTL(p.TTL, 4)
 	port := resolvePort(p.Port, fw.Port)
 	userEnv := ensureEnv(p.Env)
-	envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
+	buildEnvVars, envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +93,7 @@ func (svc *Service) CreateSandbox(user *store.User, p SandboxCreateParams) (*Dep
 			Port:         port,
 			Image:        fw.Image,
 			FrameworkEnv: fw.Env,
+			BuildEnv:     buildEnvVars,
 			UserEnv:      envVars,
 			Memory:       p.Memory,
 			NetworkQuota: resolvedQuota,
@@ -372,7 +373,7 @@ func (svc *Service) PromoteSandbox(user *store.User, p PromoteParams) (*DeployRe
 	}
 	svc.Store.UpdateDeploymentEnvJSON(deploy.ID, marshalEnv(userEnv))
 	// Resolve secrets JIT for container
-	envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, secretNames)
+	buildEnvVars, envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, secretNames)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +396,7 @@ func (svc *Service) PromoteSandbox(user *store.User, p PromoteParams) (*DeployRe
 		CodeDir: codeDir, Subdomain: newSubdomain,
 		Memory: p.Memory, CPUs: p.CPUs, NetworkQuota: resolvedQuota,
 		LogPrefix: "promote", FW: fwInfo(fw), Port: fw.Port,
-		EnvVars: envVars, AC: aci,
+		BuildEnvVars: buildEnvVars, EnvVars: envVars, AC: aci,
 	})
 
 	return &DeployResult{

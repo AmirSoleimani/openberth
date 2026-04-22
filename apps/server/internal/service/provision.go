@@ -207,6 +207,7 @@ func (svc *Service) buildAndStart(p buildStartParams) {
 			InstallCmd:   p.FW.InstallCmd,
 			CacheDir:     p.FW.CacheDir,
 			FrameworkEnv: p.FW.Env,
+			BuildEnv:     p.BuildEnvVars,
 			UserEnv:      p.EnvVars,
 			Memory:       p.Memory,
 			CPUs:         p.CPUs,
@@ -227,8 +228,9 @@ func (svc *Service) buildAndStart(p buildStartParams) {
 }
 
 // rebuildAndStart runs the container rebuild in a goroutine.
-// Used by UpdateCode and UpdateTarball.
-func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, fw *frameworkInfo, port int, envVars map[string]string, memory, cpus, networkQuota, logPrefix string) {
+// Used by UpdateCode and UpdateTarball. buildEnvVars is what the build
+// phase sees (no resolved secrets); envVars is the full runtime env.
+func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, fw *frameworkInfo, port int, buildEnvVars, envVars map[string]string, memory, cpus, networkQuota, logPrefix string) {
 	codeDir := filepath.Join(svc.Cfg.DeploysDir, deploy.ID)
 	go func() {
 		result, err := svc.Runtime.Rebuild(runtime.DeployOpts{
@@ -245,6 +247,7 @@ func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, f
 			InstallCmd:   fw.InstallCmd,
 			CacheDir:     fw.CacheDir,
 			FrameworkEnv: fw.Env,
+			BuildEnv:     buildEnvVars,
 			UserEnv:      envVars,
 			Memory:       memory,
 			CPUs:         cpus,
@@ -306,22 +309,16 @@ func (svc *Service) detectAndRebuild(deploy *store.Deployment, userName string, 
 		svc.Store.UpdateDeploymentEnvJSON(deploy.ID, string(b))
 	}
 
-	// Resolve secrets from deployment's stored references and merge
-	// Secrets go in first, then explicit env overrides same-named secrets
-	envVars := map[string]string{}
+	// Resolve secrets from deployment's stored references. mergeEnvAndSecrets
+	// returns two maps: buildEnvVars omits resolved secret values (so build-
+	// time dependency code can't read them) while envVars is the full
+	// runtime merge.
 	secretNames := parseSecretsJSON(deploy.SecretsJSON)
-	if len(secretNames) > 0 {
-		secretEnv, err := svc.resolveSecrets(deploy.UserID, secretNames)
-		if err != nil {
-			log.Printf("[%s] Failed to resolve secrets for %s: %v", logPrefix, deploy.ID, err)
-		} else {
-			for k, v := range secretEnv {
-				envVars[k] = v
-			}
-		}
-	}
-	for k, v := range userEnv {
-		envVars[k] = v
+	buildEnvVars, envVars, err := svc.mergeEnvAndSecrets(deploy.UserID, userEnv, secretNames)
+	if err != nil {
+		log.Printf("[%s] Failed to resolve secrets for %s: %v", logPrefix, deploy.ID, err)
+		buildEnvVars = userEnv
+		envVars = userEnv
 	}
 
 	resolvedPort := resolvePort(port, fw.Port)
@@ -333,7 +330,7 @@ func (svc *Service) detectAndRebuild(deploy *store.Deployment, userName string, 
 	}
 	svc.Store.UpdateDeploymentStatus(deploy.ID, "updating")
 
-	svc.rebuildAndStart(deploy, userName, fwInfo(fw), resolvedPort, envVars, memory, cpus, quota, logPrefix)
+	svc.rebuildAndStart(deploy, userName, fwInfo(fw), resolvedPort, buildEnvVars, envVars, memory, cpus, quota, logPrefix)
 
 	return &UpdateResult{
 		ID:      deploy.ID,

@@ -264,25 +264,59 @@ func (svc *Service) resolveSecrets(userID string, names []string) (map[string]st
 }
 
 // mergeEnvAndSecrets resolves secrets and merges with explicit env vars.
-// Explicit env vars take precedence over secrets with the same name.
-func (svc *Service) mergeEnvAndSecrets(userID string, env map[string]string, secretNames []string) (map[string]string, error) {
+// Returns two maps:
+//
+//   - buildEnv:   env visible to the build phase. Includes explicit env vars
+//                 (set by the user via p.EnvVars) but *never* resolved secret
+//                 values — a malicious postinstall script in a third-party
+//                 npm / pip / go dependency would otherwise read production
+//                 secrets during build.
+//   - runtimeEnv: env visible to the runtime container. Full merge of secrets
+//                 + explicit env vars; explicit vars win on key collision.
+//
+// The LegacyBuildSecrets config flag reverts to the old behavior
+// (buildEnv == runtimeEnv) for one release so operators whose builds depend
+// on a secret being present can migrate.
+func (svc *Service) mergeEnvAndSecrets(userID string, env map[string]string, secretNames []string) (buildEnv, runtimeEnv map[string]string, err error) {
 	env = ensureEnv(env)
 
 	secretEnv, err := svc.resolveSecrets(userID, secretNames)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Secrets first, then env overrides
-	merged := make(map[string]string, len(secretEnv)+len(env))
+	// Runtime: secrets first, then explicit env overrides.
+	runtimeEnv = make(map[string]string, len(secretEnv)+len(env))
 	for k, v := range secretEnv {
-		merged[k] = v
+		runtimeEnv[k] = v
 	}
 	for k, v := range env {
-		merged[k] = v
+		runtimeEnv[k] = v
 	}
 
-	return merged, nil
+	if svc.Cfg.LegacyBuildSecrets {
+		// Explicit opt-in: old behavior. Log once per call so operators see
+		// the deprecation warning in their deploy logs.
+		log.Printf("[secrets] legacy_build_secrets=true — injecting resolved secret values into build container (deprecated; will be removed)")
+		buildEnv = runtimeEnv
+		return buildEnv, runtimeEnv, nil
+	}
+
+	// Build: only explicit env vars, with secret-named keys dropped. This
+	// protects even operators who deliberately set a user env var with the
+	// same name as a secret from leaking the resolved value to build.
+	buildEnv = make(map[string]string, len(env))
+	secretKey := make(map[string]bool, len(secretEnv))
+	for k := range secretEnv {
+		secretKey[k] = true
+	}
+	for k, v := range env {
+		if secretKey[k] {
+			continue
+		}
+		buildEnv[k] = v
+	}
+	return buildEnv, runtimeEnv, nil
 }
 
 // marshalSecrets serializes secret names to JSON array string.

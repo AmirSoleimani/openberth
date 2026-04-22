@@ -732,7 +732,15 @@ func cmdList() {
 		os.Exit(1)
 	}
 
-	result, err := client.Request("GET", "/api/deployments")
+	// Default: only the caller's own deployments (server scopes via ?owner=me).
+	// --all shows every deployment on the server with an owner column.
+	showAll := hasFlag("all")
+	path := "/api/deployments?owner=me"
+	if showAll {
+		path = "/api/deployments"
+	}
+
+	result, err := client.Request("GET", path)
 	if err != nil {
 		fail(err.Error())
 		os.Exit(1)
@@ -742,32 +750,52 @@ func cmdList() {
 	fmt.Println()
 	if len(deploys) == 0 {
 		info("No active deployments.")
+		fmt.Println()
+		return
+	}
+
+	if showAll {
+		fmt.Printf("  %s%-12s %-20s %-14s %-12s %-10s %-6s %s%s\n", cDim, "ID", "NAME", "OWNER", "FRAMEWORK", "STATUS", "AGE", "URL", cReset)
+		fmt.Printf("  %s%s%s\n", cDim, strings.Repeat("─", 112), cReset)
 	} else {
 		fmt.Printf("  %s%-12s %-20s %-12s %-10s %-6s %s%s\n", cDim, "ID", "NAME", "FRAMEWORK", "STATUS", "AGE", "URL", cReset)
 		fmt.Printf("  %s%s%s\n", cDim, strings.Repeat("─", 96), cReset)
-		for _, d := range deploys {
-			dm, _ := d.(map[string]interface{})
-			id, _ := dm["id"].(string)
-			name, _ := dm["name"].(string)
-			fw, _ := dm["framework"].(string)
-			status, _ := dm["containerStatus"].(string)
-			url, _ := dm["url"].(string)
-			accessMode, _ := dm["accessMode"].(string)
-			createdAt, _ := dm["createdAt"].(string)
-			mode, _ := dm["mode"].(string)
+	}
 
-			indicator := " "
-			if mode == "sandbox" {
-				indicator = cYellow + "⚙" + cReset
-			}
-			if accessMode != "" && accessMode != "public" {
-				indicator = cYellow + "🔒" + cReset
-			}
+	for _, d := range deploys {
+		dm, _ := d.(map[string]interface{})
+		id, _ := dm["id"].(string)
+		name, _ := dm["name"].(string)
+		fw, _ := dm["framework"].(string)
+		// Read the DB-level status (building/running/updating/failed). The
+		// list response no longer carries containerStatus — that's only
+		// emitted by GET /api/deployments/{id}.
+		status, _ := dm["status"].(string)
+		url, _ := dm["url"].(string)
+		accessMode, _ := dm["accessMode"].(string)
+		createdAt, _ := dm["createdAt"].(string)
+		mode, _ := dm["mode"].(string)
+		ownerName, _ := dm["ownerName"].(string)
 
-			statusColor := cYellow
-			if status == "running" {
-				statusColor = cGreen
-			}
+		indicator := " "
+		if mode == "sandbox" {
+			indicator = cYellow + "⚙" + cReset
+		}
+		if accessMode != "" && accessMode != "public" {
+			indicator = cYellow + "🔒" + cReset
+		}
+
+		statusColor := cYellow
+		if status == "running" {
+			statusColor = cGreen
+		} else if status == "failed" {
+			statusColor = cRed
+		}
+
+		if showAll {
+			fmt.Printf("  %-12s %-20s %-14s %-12s %s%-10s%s %-6s %s %s%s%s\n",
+				id, truncate(name, 20), truncate(ownerName, 14), fw, statusColor, status, cReset, formatAge(createdAt), indicator, cCyan, url, cReset)
+		} else {
 			fmt.Printf("  %-12s %-20s %-12s %s%-10s%s %-6s %s %s%s%s\n",
 				id, truncate(name, 20), fw, statusColor, status, cReset, formatAge(createdAt), indicator, cCyan, url, cReset)
 		}

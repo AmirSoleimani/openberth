@@ -13,7 +13,7 @@ import { DestroyDialog } from "./components/dialogs/DestroyDialog";
 import { EditDialog, type EditData } from "./components/dialogs/EditDialog";
 import { PasswordDialog } from "./components/dialogs/PasswordDialog";
 import { ApiKeyDialog } from "./components/dialogs/ApiKeyDialog";
-import type { GalleryItem, GalleryResponse } from "./types";
+import type { GalleryItem, MeResponse } from "./types";
 
 type Route =
   | { view: "gallery" }
@@ -58,10 +58,10 @@ export default function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const onAuthData = useCallback((data: GalleryResponse) => {
-    auth.setCurrentUserId(data.userId || null);
-    auth.setUserRole(data.userRole || null);
-    auth.setUserName(data.userName || null);
+  const onAuthData = useCallback((data: MeResponse) => {
+    auth.setCurrentUserId(data.id || null);
+    auth.setUserRole(data.role || null);
+    auth.setUserName(data.displayName || data.name || null);
     auth.setHasPassword(data.hasPassword || false);
     auth.setServerVersion(data.serverVersion || "");
   }, []);
@@ -69,7 +69,7 @@ export default function App() {
   const { items, loading, fetchGallery } = useGallery({ apiKey: auth.apiKey, onAuthData });
 
   // Filter items (only for gallery and user views)
-  const baseItems = route.view === "user" ? items.filter((i) => i.userId === (route as { userId: string }).userId) : items;
+  const baseItems = route.view === "user" ? items.filter((i) => i.ownerId === (route as { userId: string }).userId) : items;
 
   const filtered = baseItems.filter((item) => {
     if (statusFilter !== "all" && item.status !== statusFilter) return false;
@@ -271,7 +271,7 @@ export default function App() {
         ) : route.view === "app" ? (
           <AppDetailView
             item={items.find((i) => i.id === (route as { appId: string }).appId)}
-            isOwned={auth.currentUserId != null && items.find((i) => i.id === (route as { appId: string }).appId)?.userId === auth.currentUserId}
+            isOwned={auth.currentUserId != null && items.find((i) => i.id === (route as { appId: string }).appId)?.ownerId === auth.currentUserId}
             onBack={() => navigate("")}
             onNavigateUser={(id) => navigate("user/" + id)}
             onToggleLock={toggleLock}

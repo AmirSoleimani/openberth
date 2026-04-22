@@ -57,7 +57,7 @@ func printHelp() {
     dev [dir]           Start sandbox with live file sync (hot reload)
     update [id]         Push code update (reads .berth.json if no ID)
     promote [id]        Promote a sandbox to a production deployment
-    list                List your deployments
+    list                List your deployments (--all shows everyone's with owner)
     status [id]         Get deployment details
     logs [id]           View container logs
     protect [id]        Set access control (basic_auth, api_key, user, public)

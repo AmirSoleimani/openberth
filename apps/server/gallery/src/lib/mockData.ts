@@ -1,4 +1,4 @@
-import type { GalleryItem, GalleryResponse } from "../types";
+import type { GalleryItem } from "../types";
 
 const now = new Date();
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3600000).toISOString();
@@ -15,7 +15,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://marketing-site.example.com",
     createdAt: hoursAgo(48),
     ownerName: "alice",
-    userId: "u1",
+    ownerId: "u1",
     accessMode: "public",
     accessUser: "",
     accessUsers: "",
@@ -36,7 +36,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://api-gateway.example.com",
     createdAt: hoursAgo(120),
     ownerName: "bob",
-    userId: "u2",
+    ownerId: "u2",
     accessMode: "api_key",
     accessUser: "",
     accessUsers: "",
@@ -57,7 +57,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://ml-notebook.example.com",
     createdAt: hoursAgo(6),
     ownerName: "alice",
-    userId: "u1",
+    ownerId: "u1",
     accessMode: "basic_auth",
     accessUser: "admin",
     accessUsers: "",
@@ -78,7 +78,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://landing-page.example.com",
     createdAt: hoursAgo(2),
     ownerName: "carol",
-    userId: "u3",
+    ownerId: "u3",
     accessMode: "public",
     accessUser: "",
     accessUsers: "",
@@ -99,7 +99,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://chat-prototype.example.com",
     createdAt: hoursAgo(1),
     ownerName: "bob",
-    userId: "u2",
+    ownerId: "u2",
     accessMode: "public",
     accessUser: "",
     accessUsers: "",
@@ -120,7 +120,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://data-pipeline.example.com",
     createdAt: hoursAgo(72),
     ownerName: "alice",
-    userId: "u1",
+    ownerId: "u1",
     accessMode: "user",
     accessUser: "",
     accessUsers: "alice,bob",
@@ -141,7 +141,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://docs-site.example.com",
     createdAt: hoursAgo(240),
     ownerName: "carol",
-    userId: "u3",
+    ownerId: "u3",
     accessMode: "public",
     accessUser: "",
     accessUsers: "",
@@ -162,7 +162,7 @@ const mockDeployments: GalleryItem[] = [
     url: "https://habit-tracker.example.com",
     createdAt: hoursAgo(12),
     ownerName: "bob",
-    userId: "u2",
+    ownerId: "u2",
     accessMode: "public",
     accessUser: "",
     accessUsers: "",
@@ -175,7 +175,10 @@ const mockDeployments: GalleryItem[] = [
   },
 ];
 
-export const mockGalleryResponse: GalleryResponse = {
+// Dev-mode fallback when the server isn't reachable. Shape matches the legacy
+// /api/gallery response so both deployments and bootstrap context are mocked
+// in one place; the hook adapts the fields to the new MeResponse shape.
+export const mockGalleryResponse = {
   deployments: mockDeployments,
   userId: "u1",
   userRole: "admin",

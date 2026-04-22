@@ -270,7 +270,7 @@ func (svc *Service) updateOwnerGuard(deployID string, user *store.User) (*store.
 	if err != nil || deploy == nil {
 		return nil, ErrNotFound("Deployment not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 	if deploy.Status != "running" && deploy.Status != "failed" {
@@ -351,7 +351,7 @@ func (svc *Service) sandboxOwnerGuard(sandboxID string, user *store.User) (*stor
 	if err != nil || deploy == nil {
 		return nil, ErrNotFound("Sandbox not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your sandbox.")
 	}
 	if deploy.Mode != "sandbox" {

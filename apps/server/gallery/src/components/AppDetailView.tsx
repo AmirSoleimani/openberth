@@ -112,7 +112,7 @@ export function AppDetailView({ item, isOwned, onBack, onNavigateUser, onToggleL
           <h1 className="text-xl font-bold break-all">{item.title || item.name}</h1>
           <div className="flex items-center gap-2 mt-1">
             <StatusDot status={item.status} />
-            <button onClick={() => onNavigateUser(item.userId)} className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
+            <button onClick={() => onNavigateUser(item.ownerId)} className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors">
               {item.ownerName}
             </button>
           </div>
@@ -145,7 +145,7 @@ export function AppDetailView({ item, isOwned, onBack, onNavigateUser, onToggleL
       {/* Info grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-6 p-4 rounded-lg border bg-muted/30">
         <InfoRow label="Owner">
-          <button onClick={() => onNavigateUser(item.userId)} className="text-primary hover:underline">
+          <button onClick={() => onNavigateUser(item.ownerId)} className="text-primary hover:underline">
             {item.ownerName}
           </button>
         </InfoRow>

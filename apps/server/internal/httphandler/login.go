@@ -369,6 +369,30 @@ func (h *Handlers) RotateAPIKey(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, 200, map[string]string{"apiKey": newKey})
 }
 
+// ── GET /api/me ──────────────────────────────────────────────────
+//
+// Returns the caller's bootstrap context. Used by the gallery SPA at load
+// time, and by any client that wants to know its own identity/role/version.
+
+func (h *Handlers) GetMe(w http.ResponseWriter, r *http.Request) {
+	user := h.requireAuth(w, r)
+	if user == nil {
+		return
+	}
+	displayName := user.DisplayName
+	if displayName == "" {
+		displayName = user.Name
+	}
+	jsonResp(w, 200, map[string]any{
+		"id":            user.ID,
+		"name":          user.Name,
+		"displayName":   displayName,
+		"role":          user.Role,
+		"hasPassword":   user.PasswordHash != "",
+		"serverVersion": h.version,
+	})
+}
+
 func setupError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(400)

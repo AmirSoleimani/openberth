@@ -194,7 +194,7 @@ func (m *MCPHandler) callTool(name string, args json.RawMessage, user *store.Use
 	case "berth_logs":
 		return m.toolLogs(args, user)
 	case "berth_list":
-		return m.toolList(user)
+		return m.toolList(args, user)
 	case "berth_destroy":
 		return m.toolDestroy(args, user)
 	case "berth_protect":
@@ -373,8 +373,21 @@ func (m *MCPHandler) toolLogs(args json.RawMessage, user *store.User) *mcpToolRe
 	return textResult(result.Logs)
 }
 
-func (m *MCPHandler) toolList(user *store.User) *mcpToolResult {
-	result, _ := m.svc.ListDeployments(user)
+func (m *MCPHandler) toolList(args json.RawMessage, user *store.User) *mcpToolResult {
+	var params struct {
+		All bool `json:"all"`
+	}
+	if len(args) > 0 {
+		json.Unmarshal(args, &params)
+	}
+	// Default scope is caller's own deployments. `all: true` lists every
+	// deployment on the server — read visibility is open; mutation still
+	// requires ownership or admin.
+	ownerFilter := user.ID
+	if params.All {
+		ownerFilter = ""
+	}
+	result, _ := m.svc.ListDeployments(user, ownerFilter)
 	if len(result) == 0 {
 		return textResult("No active deployments.")
 	}

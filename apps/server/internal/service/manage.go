@@ -61,7 +61,7 @@ func (svc *Service) UpdateMeta(user *store.User, p UpdateMetaParams) (*UpdateMet
 	if err != nil || deploy == nil {
 		return nil, ErrNotFound("Deployment not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 	if deploy.Locked {
@@ -129,7 +129,7 @@ func (svc *Service) ProtectDeployment(user *store.User, p ProtectParams) (*Prote
 	if err != nil || deploy == nil {
 		return nil, ErrNotFound("Deployment not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 	if deploy.Status != "running" {
@@ -194,7 +194,7 @@ func (svc *Service) DestroyDeployment(user *store.User, id string) error {
 	if deploy == nil {
 		return ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return ErrForbidden("Not your deployment.")
 	}
 	if deploy.Locked {
@@ -213,7 +213,7 @@ func (svc *Service) LockDeployment(user *store.User, id string, locked bool) (*L
 	if deploy == nil {
 		return nil, ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 	if deploy.Status != "running" {

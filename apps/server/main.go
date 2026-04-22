@@ -68,12 +68,12 @@ func main() {
 
 	// Public
 	mux.HandleFunc("GET /health", h.Health)
-	mux.HandleFunc("GET /api/gallery", h.Gallery)
 
 	// Always-available session management (kept even when web UI disabled,
 	// so OIDC-authenticated users can still logout / change password / rotate keys).
 	mux.HandleFunc("POST /logout", h.Logout)
 	mux.HandleFunc("POST /api/login/exchange", h.LoginExchange)
+	mux.HandleFunc("GET /api/me", h.GetMe)
 	mux.HandleFunc("POST /api/me/password", h.ChangePassword)
 	mux.HandleFunc("POST /api/me/rotate-key", h.RotateAPIKey)
 
@@ -246,8 +246,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 		needsCORS := strings.HasPrefix(p, "/api/deployments/") ||
 			strings.HasPrefix(p, "/api/sandbox/") ||
 			strings.HasPrefix(p, "/api/secrets") ||
-			p == "/api/gallery" ||
+			p == "/api/deployments" ||
 			p == "/api/login/exchange" ||
+			p == "/api/me" ||
 			p == "/api/me/password" ||
 			strings.HasPrefix(p, "/_data") ||
 			p == "/mcp" ||

@@ -150,30 +150,6 @@ func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
 	jsonResp(w, 200, result)
 }
 
-// ── Gallery ─────────────────────────────────────────────────────────
-
-func (h *Handlers) Gallery(w http.ResponseWriter, r *http.Request) {
-	user := h.requireAuth(w, r)
-	if user == nil {
-		return
-	}
-	items, err := h.svc.ListGallery()
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	resp := map[string]interface{}{"deployments": items}
-	resp["userId"] = user.ID
-	resp["userRole"] = user.Role
-	resp["userName"] = user.DisplayName
-	if resp["userName"] == "" {
-		resp["userName"] = user.Name
-	}
-	resp["hasPassword"] = user.PasswordHash != ""
-	resp["serverVersion"] = h.version
-	jsonResp(w, 200, resp)
-}
-
 // ── DeployCode ──────────────────────────────────────────────────────
 
 type CodeDeployRequest struct {
@@ -273,7 +249,20 @@ func (h *Handlers) ListDeployments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, _ := h.svc.ListDeployments(user)
+	// `?owner=me` scopes to the caller; `?owner=<userID>` scopes to that user;
+	// no param (or `?owner=all`) returns every deployment on the server.
+	// Read visibility is open — mutation endpoints still enforce ownership.
+	ownerFilter := ""
+	switch q := r.URL.Query().Get("owner"); q {
+	case "", "all":
+		// no filter
+	case "me":
+		ownerFilter = user.ID
+	default:
+		ownerFilter = q
+	}
+
+	result, _ := h.svc.ListDeployments(user, ownerFilter)
 	jsonResp(w, 200, map[string]interface{}{"deployments": result, "count": len(result)})
 }
 
@@ -481,7 +470,7 @@ func (h *Handlers) GetSource(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 404, "Not found.")
 		return
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !service.CanMutateDeploy(deploy, user) {
 		jsonErr(w, 403, "Not your deployment.")
 		return
 	}

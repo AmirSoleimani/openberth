@@ -11,6 +11,9 @@ import (
 
 // ── Result types ────────────────────────────────────────────────────
 
+// DeployInfo is the response shape for both list and single-deployment reads.
+// ContainerStatus and QuotaRemaining are populated only by the single-get path
+// (GetDeployment); list responses leave them zero so the list stays cheap.
 type DeployInfo struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -19,13 +22,17 @@ type DeployInfo struct {
 	Subdomain       string `json:"subdomain"`
 	Framework       string `json:"framework"`
 	Status          string `json:"status"`
-	ContainerStatus string `json:"containerStatus"`
+	ContainerStatus string `json:"containerStatus,omitempty"`
 	URL             string `json:"url"`
-	Port            int    `json:"port"`
+	Port            int    `json:"port,omitempty"`
 	CreatedAt       string `json:"createdAt"`
 	ExpiresAt       string `json:"expiresAt"`
+	TTLHours        int    `json:"ttlHours,omitempty"`
+	OwnerID         string `json:"ownerId"`
+	OwnerName       string `json:"ownerName,omitempty"`
 	AccessMode      string `json:"accessMode"`
 	AccessUser      string `json:"accessUser,omitempty"`
+	AccessUsers     string `json:"accessUsers,omitempty"`
 	Mode            string `json:"mode"`
 	NetworkQuota    string `json:"networkQuota,omitempty"`
 	QuotaRemaining  *int64 `json:"quotaRemaining,omitempty"`
@@ -35,28 +42,6 @@ type DeployInfo struct {
 type LogsResult struct {
 	ID   string `json:"id"`
 	Logs string `json:"logs"`
-}
-
-type GalleryItem struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Subdomain    string `json:"subdomain"`
-	Framework    string `json:"framework"`
-	URL          string `json:"url"`
-	CreatedAt    string `json:"createdAt"`
-	OwnerName    string `json:"ownerName"`
-	UserID       string `json:"userId"`
-	AccessMode   string `json:"accessMode"`
-	AccessUser   string `json:"accessUser,omitempty"`
-	AccessUsers  string `json:"accessUsers,omitempty"`
-	TTLHours     int    `json:"ttlHours"`
-	ExpiresAt    string `json:"expiresAt"`
-	Mode         string `json:"mode"`
-	NetworkQuota string `json:"networkQuota,omitempty"`
-	Locked       bool   `json:"locked"`
-	Status       string `json:"status"`
 }
 
 type SourceResult struct {
@@ -70,7 +55,7 @@ func (svc *Service) GetDeployment(user *store.User, id string) (*DeployInfo, err
 	if deploy == nil {
 		return nil, ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 
@@ -87,8 +72,11 @@ func (svc *Service) GetDeployment(user *store.User, id string) (*DeployInfo, err
 		Port:            deploy.Port,
 		CreatedAt:       deploy.CreatedAt,
 		ExpiresAt:       deploy.ExpiresAt,
+		TTLHours:        deploy.TTLHours,
+		OwnerID:         deploy.UserID,
 		AccessMode:      deploy.AccessMode,
 		AccessUser:      deploy.AccessUser,
+		AccessUsers:     deploy.AccessUsers,
 		Mode:            deploy.Mode,
 		NetworkQuota:    deploy.NetworkQuota,
 		Locked:          deploy.Locked,
@@ -115,7 +103,7 @@ func (svc *Service) GetLogs(user *store.User, id string, tail int) (*LogsResult,
 	if deploy == nil {
 		return nil, ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 
@@ -134,7 +122,7 @@ func (svc *Service) GetLogStream(user *store.User, id string, tail int) (io.Read
 	if deploy == nil {
 		return nil, ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 	return svc.Container.LogStream(deploy.ID, tail)
@@ -142,72 +130,38 @@ func (svc *Service) GetLogStream(user *store.User, id string, tail int) (io.Read
 
 // ── List Deployments ────────────────────────────────────────────────
 
-func (svc *Service) ListDeployments(user *store.User) ([]DeployInfo, error) {
-	userID := user.ID
-	if user.Role == "admin" {
-		userID = ""
-	}
-
-	deploys, _ := svc.Store.ListDeployments(userID)
+// ListDeployments returns deployments visible to the caller.
+// Read visibility is open: any authenticated user can list every deployment.
+// ownerFilter: "" returns all deployments; any other value filters by user ID.
+// ContainerStatus and QuotaRemaining are omitted from list rows to keep the
+// response cheap at scale — callers fetch them via GetDeployment when needed.
+func (svc *Service) ListDeployments(user *store.User, ownerFilter string) ([]DeployInfo, error) {
+	deploys, _ := svc.Store.ListDeployments(ownerFilter)
 	result := make([]DeployInfo, 0, len(deploys))
 	for _, d := range deploys {
-		cs := d.Status
-		if d.Status == "running" {
-			cs = svc.Container.Status(d.ID)
-		}
 		result = append(result, DeployInfo{
-			ID:              d.ID,
-			Name:            d.Name,
-			Title:           d.Title,
-			Description:     d.Description,
-			Subdomain:       d.Subdomain,
-			Framework:       d.Framework,
-			Status:          d.Status,
-			ContainerStatus: cs,
-			URL:             svc.deployURL(d.Subdomain),
-			CreatedAt:       d.CreatedAt,
-			ExpiresAt:       d.ExpiresAt,
-			AccessMode:      d.AccessMode,
-			Mode:            d.Mode,
-		})
-	}
-
-	return result, nil
-}
-
-// ── List Gallery ────────────────────────────────────────────────────
-
-func (svc *Service) ListGallery() ([]GalleryItem, error) {
-	deploys, err := svc.Store.ListPublicDeployments()
-	if err != nil {
-		return nil, ErrInternal("Failed to list deployments.")
-	}
-
-	items := make([]GalleryItem, 0, len(deploys))
-	for _, d := range deploys {
-		items = append(items, GalleryItem{
 			ID:           d.ID,
 			Name:         d.Name,
 			Title:        d.Title,
 			Description:  d.Description,
 			Subdomain:    d.Subdomain,
 			Framework:    d.Framework,
+			Status:       d.Status,
 			URL:          svc.deployURL(d.Subdomain),
 			CreatedAt:    d.CreatedAt,
+			ExpiresAt:    d.ExpiresAt,
+			TTLHours:     d.TTLHours,
+			OwnerID:      d.UserID,
 			OwnerName:    d.OwnerName,
-			UserID:       d.UserID,
 			AccessMode:   d.AccessMode,
 			AccessUser:   d.AccessUser,
 			AccessUsers:  d.AccessUsers,
-			TTLHours:     d.TTLHours,
-			ExpiresAt:    d.ExpiresAt,
 			Mode:         d.Mode,
 			NetworkQuota: d.NetworkQuota,
 			Locked:       d.Locked,
-			Status:       d.Status,
 		})
 	}
-	return items, nil
+	return result, nil
 }
 
 // ── Get Source ───────────────────────────────────────────────────────
@@ -217,7 +171,7 @@ func (svc *Service) GetSource(user *store.User, id string) (*SourceResult, error
 	if deploy == nil {
 		return nil, ErrNotFound("Not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your deployment.")
 	}
 

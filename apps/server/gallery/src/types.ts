@@ -7,24 +7,29 @@ export interface GalleryItem {
   framework: string;
   url: string;
   createdAt: string;
-  ownerName: string;
-  userId: string;
-  accessMode: string;
-  accessUser: string;
-  accessUsers: string;
-  ttlHours: number;
   expiresAt: string;
+  ttlHours: number;
+  ownerId: string;
+  ownerName: string;
+  accessMode: string;
+  accessUser?: string;
+  accessUsers?: string;
   mode: string;
-  networkQuota: string;
+  networkQuota?: string;
   locked: boolean;
   status: string;
 }
 
-export interface GalleryResponse {
+export interface DeploymentsResponse {
   deployments: GalleryItem[];
-  userId?: string;
-  userRole?: string;
-  userName?: string;
-  hasPassword?: boolean;
-  serverVersion?: string;
+  count: number;
+}
+
+export interface MeResponse {
+  id: string;
+  name: string;
+  displayName: string;
+  role: "admin" | "user";
+  hasPassword: boolean;
+  serverVersion: string;
 }

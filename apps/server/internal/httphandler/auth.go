@@ -149,7 +149,7 @@ func (h *Handlers) AuthCheck(w http.ResponseWriter, r *http.Request) {
 		if subdomain != "" {
 			deploy, _ := h.svc.Store.GetDeploymentBySubdomain(subdomain)
 			if deploy != nil && deploy.AccessUsers != "" {
-				if deploy.UserID != user.ID && user.Role != "admin" {
+				if !service.CanMutateDeploy(deploy, user) {
 					allowed := strings.Split(deploy.AccessUsers, ",")
 					found := false
 					for _, u := range allowed {

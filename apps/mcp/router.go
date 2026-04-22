@@ -21,7 +21,7 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) *ToolResult {
 	case "berth_logs":
 		return s.toolLogs(args)
 	case "berth_list":
-		return s.toolList()
+		return s.toolList(args)
 	case "berth_destroy":
 		return s.toolDestroy(args)
 	case "berth_protect":

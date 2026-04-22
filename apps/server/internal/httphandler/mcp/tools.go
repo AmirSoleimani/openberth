@@ -81,10 +81,12 @@ func tools() []mcpTool {
 		},
 		{
 			Name:        "berth_list",
-			Description: "List all active deployments with their IDs, URLs, and statuses.\n\nUse this to find existing deployments before creating new ones. If the user wants to update an existing app, find it here first rather than creating a duplicate.",
+			Description: "List active deployments. By default returns the caller's own deployments. Pass `all: true` to list every deployment on the server (read visibility is open — each entry includes `ownerId`/`ownerName`). Mutation still requires ownership or admin.\n\nUse this to find existing deployments before creating new ones. If the user wants to update an existing app, find it here first rather than creating a duplicate.",
 			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
+				"type": "object",
+				"properties": map[string]interface{}{
+					"all": map[string]interface{}{"type": "boolean", "description": "If true, list every user's deployments. Default false = own only."},
+				},
 			},
 		},
 		{

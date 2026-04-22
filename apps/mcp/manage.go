@@ -98,8 +98,20 @@ func (s *MCPServer) toolLogs(args json.RawMessage) *ToolResult {
 	return textResult(logs)
 }
 
-func (s *MCPServer) toolList() *ToolResult {
-	body, err := s.apiGet("/api/deployments")
+func (s *MCPServer) toolList(args json.RawMessage) *ToolResult {
+	var params struct {
+		All bool `json:"all"`
+	}
+	if len(args) > 0 {
+		json.Unmarshal(args, &params)
+	}
+	// Default scope: caller's own deployments. `all: true` lists every
+	// deployment on the server (read visibility is open).
+	path := "/api/deployments?owner=me"
+	if params.All {
+		path = "/api/deployments"
+	}
+	body, err := s.apiGet(path)
 	if err != nil {
 		return errorResult("List failed: " + err.Error())
 	}

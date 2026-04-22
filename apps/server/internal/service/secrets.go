@@ -71,7 +71,7 @@ func (svc *Service) SecretSet(user *store.User, name, value, description string,
 	// Creator/admin gate for globals. User-scoped secrets are implicitly
 	// owned by the querying user (user_id scoped), so only globals need the
 	// CreatedBy check.
-	if isUpdate && global && user.Role != "admin" {
+	if isUpdate && global && !IsAdmin(user) {
 		if existing.CreatedBy == nil || *existing.CreatedBy != user.ID {
 			return nil, ErrForbidden("Only the creator of this global secret (or an admin) can update it.")
 		}
@@ -199,7 +199,7 @@ func (svc *Service) SecretDelete(user *store.User, name string, global bool) err
 	}
 
 	// For global secrets, only the creator (or an admin) may delete.
-	if global && user.Role != "admin" {
+	if global && !IsAdmin(user) {
 		existing, _ := svc.Store.GetGlobalSecret(name)
 		if existing == nil {
 			return ErrNotFound("Secret not found.")

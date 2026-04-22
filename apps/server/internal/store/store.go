@@ -46,6 +46,7 @@ type Deployment struct {
 	CPUs         string `json:"cpus,omitempty"`
 	Locked       bool   `json:"locked"`
 	SecretsJSON  string `json:"secretsJson"`
+	OwnerName    string `json:"ownerName,omitempty"` // populated by list queries via JOIN; empty elsewhere
 }
 
 type Store struct {
@@ -404,15 +405,29 @@ func (s *Store) GetDeploymentBySubdomain(subdomain string) (*Deployment, error) 
 	return d, err
 }
 
+// ListDeployments returns non-destroyed deployments, always joined with users
+// to populate OwnerName. If userID is empty all deployments are returned;
+// otherwise results are filtered to that owner.
 func (s *Store) ListDeployments(userID string) ([]Deployment, error) {
+	base := `SELECT d.id, d.user_id, d.name, d.subdomain, d.framework,
+		COALESCE(d.container_id,''), COALESCE(d.port,0), d.status, d.ttl_hours,
+		COALESCE(d.env_json,'{}'), d.created_at, COALESCE(d.expires_at,''),
+		COALESCE(d.access_mode,'public'), COALESCE(d.access_user,''),
+		COALESCE(d.access_hash,''), COALESCE(d.title,''), COALESCE(d.description,''),
+		COALESCE(d.mode,'deploy'), COALESCE(d.network_quota,''),
+		COALESCE(d.access_users,''), COALESCE(d.memory,''), COALESCE(d.cpus,''),
+		COALESCE(d.locked,0),
+		COALESCE(NULLIF(u.display_name, ''), u.name, '') AS owner_name
+	FROM deployments d
+	LEFT JOIN users u ON d.user_id = u.id
+	WHERE d.status != 'destroyed' `
+
 	var rows *sql.Rows
 	var err error
-
-	query := "SELECT id, user_id, name, subdomain, framework, COALESCE(container_id,''), COALESCE(port,0), status, ttl_hours, COALESCE(env_json,'{}'), created_at, COALESCE(expires_at,''), COALESCE(access_mode,'public'), COALESCE(access_user,''), COALESCE(access_hash,''), COALESCE(title,''), COALESCE(description,''), COALESCE(mode,'deploy'), COALESCE(network_quota,''), COALESCE(access_users,''), COALESCE(memory,''), COALESCE(cpus,''), COALESCE(locked,0) FROM deployments WHERE status != 'destroyed' "
 	if userID != "" {
-		rows, err = s.db.Query(query+"AND user_id = ? ORDER BY created_at DESC", userID)
+		rows, err = s.db.Query(base+"AND d.user_id = ? ORDER BY d.created_at DESC", userID)
 	} else {
-		rows, err = s.db.Query(query + "ORDER BY created_at DESC")
+		rows, err = s.db.Query(base + "ORDER BY d.created_at DESC")
 	}
 	if err != nil {
 		return nil, err
@@ -423,45 +438,12 @@ func (s *Store) ListDeployments(userID string) ([]Deployment, error) {
 	for rows.Next() {
 		var d Deployment
 		var lockedInt int
-		rows.Scan(&d.ID, &d.UserID, &d.Name, &d.Subdomain, &d.Framework, &d.ContainerID, &d.Port, &d.Status, &d.TTLHours, &d.EnvJSON, &d.CreatedAt, &d.ExpiresAt, &d.AccessMode, &d.AccessUser, &d.AccessHash, &d.Title, &d.Description, &d.Mode, &d.NetworkQuota, &d.AccessUsers, &d.Memory, &d.CPUs, &lockedInt)
+		rows.Scan(&d.ID, &d.UserID, &d.Name, &d.Subdomain, &d.Framework, &d.ContainerID, &d.Port,
+			&d.Status, &d.TTLHours, &d.EnvJSON, &d.CreatedAt, &d.ExpiresAt, &d.AccessMode,
+			&d.AccessUser, &d.AccessHash, &d.Title, &d.Description, &d.Mode, &d.NetworkQuota,
+			&d.AccessUsers, &d.Memory, &d.CPUs, &lockedInt, &d.OwnerName)
 		d.Locked = lockedInt != 0
 		deploys = append(deploys, d)
-	}
-	return deploys, nil
-}
-
-// PublicDeployment holds a deployment with its owner's display name for gallery display.
-type PublicDeployment struct {
-	Deployment
-	OwnerName string `json:"ownerName"`
-}
-
-func (s *Store) ListPublicDeployments() ([]PublicDeployment, error) {
-	rows, err := s.db.Query(`
-		SELECT d.id, d.user_id, d.name, d.subdomain, d.framework, COALESCE(d.container_id,''), COALESCE(d.port,0),
-		       d.status, d.ttl_hours, d.created_at, COALESCE(d.expires_at,''), COALESCE(d.access_mode,'public'),
-		       COALESCE(d.access_user,''), COALESCE(d.title,''), COALESCE(d.description,''),
-		       COALESCE(NULLIF(u.display_name, ''), u.name), COALESCE(d.mode,'deploy'), COALESCE(d.network_quota,''),
-		       COALESCE(d.access_users,''), COALESCE(d.locked,0)
-		FROM deployments d
-		LEFT JOIN users u ON d.user_id = u.id
-		WHERE d.status != 'destroyed'
-		ORDER BY d.created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var deploys []PublicDeployment
-	for rows.Next() {
-		var p PublicDeployment
-		var lockedInt int
-		rows.Scan(&p.ID, &p.UserID, &p.Name, &p.Subdomain, &p.Framework, &p.ContainerID, &p.Port,
-			&p.Status, &p.TTLHours, &p.CreatedAt, &p.ExpiresAt, &p.AccessMode,
-			&p.AccessUser, &p.Title, &p.Description, &p.OwnerName, &p.Mode, &p.NetworkQuota,
-			&p.AccessUsers, &lockedInt)
-		p.Locked = lockedInt != 0
-		deploys = append(deploys, p)
 	}
 	return deploys, nil
 }

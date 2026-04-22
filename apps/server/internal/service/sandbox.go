@@ -310,7 +310,7 @@ func (svc *Service) PromoteSandbox(user *store.User, p PromoteParams) (*DeployRe
 	if err != nil || deploy == nil {
 		return nil, ErrNotFound("Sandbox not found.")
 	}
-	if deploy.UserID != user.ID && user.Role != "admin" {
+	if !CanMutateDeploy(deploy, user) {
 		return nil, ErrForbidden("Not your sandbox.")
 	}
 	if deploy.Mode != "sandbox" {

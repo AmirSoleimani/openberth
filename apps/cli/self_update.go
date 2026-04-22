@@ -1,17 +1,26 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
 
 const githubRepo = "AmirSoleimani/openberth"
+
+// releaseSigningPubKey — see apps/server/self_update.go for semantics.
+// Hex-encoded ed25519 public key (32 bytes). Empty until the release
+// signing ceremony has been performed and the real value committed.
+var releaseSigningPubKey = ""
 
 func cmdUpdateCLI() {
 	fmt.Println()
@@ -65,16 +74,27 @@ func cmdUpdateCLI() {
 	}
 
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", githubRepo, targetVersion, binaryName)
+	sigURL := url + ".sig"
 
 	spin("Downloading " + binaryName)
 
-	tmpFile, err := os.CreateTemp("", "berth-update-*")
+	stageDir, err := cliUpdateStageDir()
 	if err != nil {
 		fmt.Println()
-		fail(fmt.Sprintf("Failed to create temp file: %v", err))
+		fail(fmt.Sprintf("Failed to prepare staging dir: %v", err))
 		os.Exit(1)
 	}
-	tmpPath := tmpFile.Name()
+	tmpPath := filepath.Join(stageDir, binaryName)
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_EXCL, 0600)
+	if err != nil {
+		os.Remove(tmpPath)
+		tmpFile, err = os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_EXCL, 0600)
+		if err != nil {
+			fmt.Println()
+			fail(fmt.Sprintf("Failed to open staging file: %v", err))
+			os.Exit(1)
+		}
+	}
 	defer os.Remove(tmpPath)
 
 	resp, err := http.Get(url)
@@ -101,6 +121,20 @@ func cmdUpdateCLI() {
 	done()
 
 	info(fmt.Sprintf("Downloaded %.1f MB", float64(n)/1024/1024))
+
+	// Signature verification
+	sigPath := tmpPath + ".sig"
+	if err := cliDownloadFile(sigURL, sigPath); err != nil {
+		fail(fmt.Sprintf("Failed to download signature: %v", err))
+		os.Exit(1)
+	}
+	defer os.Remove(sigPath)
+	if err := cliVerifyReleaseSignature(tmpPath, sigPath); err != nil {
+		fail(fmt.Sprintf("Signature verification failed: %v", err))
+		info("Refusing to install unverified binary. See docs/signing.md.")
+		os.Exit(1)
+	}
+	info("Signature verified.")
 
 	// Make executable
 	if err := os.Chmod(tmpPath, 0755); err != nil {
@@ -167,4 +201,68 @@ func fetchLatestRelease() (string, error) {
 	}
 
 	return release.TagName, nil
+}
+
+// cliUpdateStageDir returns a private (0700) directory under the user's
+// cache root in which to stage CLI update downloads.
+func cliUpdateStageDir() (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(cache, "openberth", "updates")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func cliDownloadFile(url, path string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_EXCL, 0600)
+	if err != nil {
+		os.Remove(path)
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|os.O_EXCL, 0600)
+		if err != nil {
+			return err
+		}
+	}
+	defer f.Close()
+	_, err = io.Copy(f, resp.Body)
+	return err
+}
+
+func cliVerifyReleaseSignature(binPath, sigPath string) error {
+	if releaseSigningPubKey == "" {
+		return errors.New("release signing public key is not configured in this build; this CLI cannot verify updates (see docs/signing.md)")
+	}
+	pub, err := hex.DecodeString(releaseSigningPubKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("malformed release signing public key")
+	}
+	sig, err := os.ReadFile(sigPath)
+	if err != nil {
+		return fmt.Errorf("read signature: %w", err)
+	}
+	for len(sig) > 0 && (sig[len(sig)-1] == '\n' || sig[len(sig)-1] == '\r') {
+		sig = sig[:len(sig)-1]
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return fmt.Errorf("signature wrong size (got %d, want %d)", len(sig), ed25519.SignatureSize)
+	}
+	bin, err := os.ReadFile(binPath)
+	if err != nil {
+		return fmt.Errorf("read binary: %w", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), bin, sig) {
+		return errors.New("ed25519 verification failed (tampered binary or wrong key)")
+	}
+	return nil
 }

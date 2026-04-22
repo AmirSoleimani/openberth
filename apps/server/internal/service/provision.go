@@ -208,8 +208,8 @@ func (svc *Service) buildAndStart(p buildStartParams) {
 			CacheDir:     p.FW.CacheDir,
 			FrameworkEnv: p.FW.Env,
 			UserEnv:      p.EnvVars,
-			Memory:       p.Memory,
-			CPUs:         p.CPUs,
+			Memory:       svc.ResolveMemory(p.Memory),
+			CPUs:         svc.ResolveCPUs(p.CPUs),
 			NetworkQuota: p.NetworkQuota,
 		})
 		if err != nil {
@@ -246,8 +246,8 @@ func (svc *Service) rebuildAndStart(deploy *store.Deployment, userName string, f
 			CacheDir:     fw.CacheDir,
 			FrameworkEnv: fw.Env,
 			UserEnv:      envVars,
-			Memory:       memory,
-			CPUs:         cpus,
+			Memory:       svc.ResolveMemory(memory),
+			CPUs:         svc.ResolveCPUs(cpus),
 			NetworkQuota: networkQuota,
 		})
 		if err != nil {

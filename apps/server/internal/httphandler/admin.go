@@ -29,6 +29,10 @@ var allowedSettings = map[string]bool{
 	"network.quota_enabled":        true,
 	"network.default_quota":        true,
 	"network.quota_reset_interval": true,
+	// Per-deploy overrides beat these; empty admin value falls through to
+	// config-file defaults (containerDefaults.memory / .cpus).
+	"container.default_memory": true,
+	"container.default_cpus":   true,
 }
 
 // ── Admin: Users ───────────────────────────────────────────────────

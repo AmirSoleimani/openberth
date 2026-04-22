@@ -157,14 +157,6 @@ func (svc *Service) recreateForSecretRotation(deploy *store.Deployment, userName
 	}
 
 	port := resolvePort(0, fw.Port)
-	memory := deploy.Memory
-	if memory == "" {
-		memory = svc.Cfg.Container.Memory
-	}
-	cpus := deploy.CPUs
-	if cpus == "" {
-		cpus = svc.Cfg.Container.CPUs
-	}
 
 	result, err := svc.Runtime.RestartRuntime(runtime.DeployOpts{
 		ID:           deploy.ID,
@@ -178,8 +170,8 @@ func (svc *Service) recreateForSecretRotation(deploy *store.Deployment, userName
 		StartCmd:     fw.StartCmd,
 		FrameworkEnv: fw.Env,
 		UserEnv:      envVars,
-		Memory:       memory,
-		CPUs:         cpus,
+		Memory:       svc.ResolveMemory(deploy.Memory),
+		CPUs:         svc.ResolveCPUs(deploy.CPUs),
 		NetworkQuota: deploy.NetworkQuota,
 	})
 	if err != nil {

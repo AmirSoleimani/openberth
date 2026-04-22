@@ -33,6 +33,35 @@ func (svc *Service) ResolveNetworkQuota(perDeployOverride string) string {
 	return svc.Cfg.Container.NetworkQuota
 }
 
+// ── Container default resolution ────────────────────────────────────
+
+// ResolveMemory returns the effective memory limit for a container.
+// Priority: per-deploy override > "container.default_memory" admin setting >
+// config file default (svc.Cfg.Container.Memory). The result is always
+// non-empty so the driver doesn't need its own fallback for this value.
+func (svc *Service) ResolveMemory(perDeployOverride string) string {
+	if perDeployOverride != "" {
+		return perDeployOverride
+	}
+	if v, _ := svc.Store.GetSetting("container.default_memory"); v != "" {
+		return v
+	}
+	return svc.Cfg.Container.Memory
+}
+
+// ResolveCPUs returns the effective CPU allocation for a container.
+// Priority: per-deploy override > "container.default_cpus" admin setting >
+// config file default (svc.Cfg.Container.CPUs).
+func (svc *Service) ResolveCPUs(perDeployOverride string) string {
+	if perDeployOverride != "" {
+		return perDeployOverride
+	}
+	if v, _ := svc.Store.GetSetting("container.default_cpus"); v != "" {
+		return v
+	}
+	return svc.Cfg.Container.CPUs
+}
+
 // QuotaResetInterval returns the configured interval for periodic network quota
 // resets. Reads "network.quota_reset_interval" setting (format: \d+(h|d)).
 // Default: 30 days.

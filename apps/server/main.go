@@ -59,6 +59,7 @@ func main() {
 		log.Fatalf("Runtime init: %v", err)
 	}
 	pm := proxy.NewProxyManager(cfg)
+	pm.NormalizeSiteFileModes()
 	ds := datastore.NewManager(cfg.PersistDir)
 	defer ds.Close()
 

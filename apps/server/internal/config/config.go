@@ -37,6 +37,13 @@ type Config struct {
 	WebDisabled     bool              `json:"webDisabled"`
 	MasterKey       string            `json:"masterKey"`
 
+	// ProxySiteConfigMode sets the file mode for Caddy site-config files
+	// written under CaddySitesDir. Defaults to 0600 — those files embed
+	// basic-auth hashes and api-key secrets and must not be world-readable.
+	// Operators whose Caddy runs as a non-root user that cannot read 0600
+	// can override (e.g. 0640 with a shared group).
+	ProxySiteConfigMode int `json:"proxySiteConfigMode,omitempty"`
+
 	// Derived paths
 	DeploysDir     string `json:"-"`
 	UploadsDir     string `json:"-"`
@@ -83,6 +90,10 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.PersistDir = filepath.Join(dataDir, "persist")
 	cfg.CaddyAccessLog = "/var/log/caddy/access.json"
+
+	if cfg.ProxySiteConfigMode == 0 {
+		cfg.ProxySiteConfigMode = 0o600
+	}
 
 	// Ensure directories exist
 	for _, d := range []string{cfg.DeploysDir, cfg.UploadsDir, cfg.CaddySitesDir, cfg.PersistDir} {

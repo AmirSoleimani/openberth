@@ -93,7 +93,7 @@ func (p *ProxyManager) AddRoute(subdomain string, hostPort int, ac *AccessContro
 	siteConfig := p.buildSiteConfig(fqdn, authBlock, subdomain, hostPort)
 
 	filePath := filepath.Join(p.cfg.CaddySitesDir, subdomain+".caddy")
-	os.WriteFile(filePath, []byte(siteConfig), 0644)
+	os.WriteFile(filePath, []byte(siteConfig), os.FileMode(p.cfg.ProxySiteConfigMode))
 	p.reload()
 
 	scheme := "https"
@@ -109,7 +109,7 @@ func (p *ProxyManager) AddRouteNoReload(subdomain string, hostPort int, ac *Acce
 	siteConfig := p.buildSiteConfig(fqdn, authBlock, subdomain, hostPort)
 
 	filePath := filepath.Join(p.cfg.CaddySitesDir, subdomain+".caddy")
-	os.WriteFile(filePath, []byte(siteConfig), 0644)
+	os.WriteFile(filePath, []byte(siteConfig), os.FileMode(p.cfg.ProxySiteConfigMode))
 }
 
 func (p *ProxyManager) RemoveRoute(subdomain string) {
@@ -167,7 +167,25 @@ func (p *ProxyManager) BlockRouteNoReload(subdomain string) {
 `, siteAddr, tlsDirective, p.cfg.CaddyAccessLog, p.cfg.Port)
 
 	filePath := filepath.Join(p.cfg.CaddySitesDir, subdomain+".caddy")
-	os.WriteFile(filePath, []byte(siteConfig), 0644)
+	os.WriteFile(filePath, []byte(siteConfig), os.FileMode(p.cfg.ProxySiteConfigMode))
+}
+
+// NormalizeSiteFileModes chmods every existing .caddy file under CaddySitesDir
+// to the configured ProxySiteConfigMode. Called once at startup so that files
+// written by prior releases (with world-readable 0644) are tightened in place
+// without waiting for a deploy/update cycle to rewrite them.
+func (p *ProxyManager) NormalizeSiteFileModes() {
+	entries, err := os.ReadDir(p.cfg.CaddySitesDir)
+	if err != nil {
+		return
+	}
+	mode := os.FileMode(p.cfg.ProxySiteConfigMode)
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".caddy" {
+			continue
+		}
+		os.Chmod(filepath.Join(p.cfg.CaddySitesDir, e.Name()), mode)
+	}
 }
 
 // RemoveAllRoutes removes all .caddy files from the sites directory and reloads Caddy.

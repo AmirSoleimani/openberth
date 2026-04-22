@@ -2,6 +2,7 @@ package httphandler
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"compress/gzip"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
+	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
 // ── Health ──────────────────────────────────────────────────────────
@@ -480,23 +482,29 @@ func (h *Handlers) GetSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Query().Get("format") == "json" {
+	switch r.URL.Query().Get("format") {
+	case "json":
 		result, err := h.svc.GetSource(user, id)
 		if err != nil {
 			writeErr(w, err)
 			return
 		}
 		jsonResp(w, 200, result)
-		return
+	case "tar.gz", "tgz", "tar":
+		writeSourceTarGz(w, deploy, srcDir)
+	default:
+		// Default: zip. Native extraction in macOS Finder / Windows Explorer,
+		// and every OS ships a zip unzipper. CLI pins ?format=tar.gz since its
+		// extractor only understands tar.gz.
+		writeSourceZip(w, deploy, srcDir)
 	}
+}
 
-	// Stream tarball
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.tar.gz"`, deploy.Name))
-	gw := gzip.NewWriter(w)
-	tw := tar.NewWriter(gw)
-
-	filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+// sourceFileEntries walks srcDir and yields every regular file to visit,
+// with its path relative to srcDir. Skips the .openberth/* hidden tree so
+// internal artifacts don't end up in downloadable source archives.
+func sourceFileEntries(srcDir string, visit func(relPath, absPath string, info os.FileInfo) error) error {
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -513,15 +521,28 @@ func (h *Handlers) GetSource(w http.ResponseWriter, r *http.Request) {
 		if info.IsDir() {
 			return nil
 		}
-		header, err := tar.FileInfoHeader(info, "")
+		return visit(rel, path, info)
+	})
+}
+
+func writeSourceTarGz(w http.ResponseWriter, deploy *store.Deployment, srcDir string) {
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.tar.gz"`, deploy.Name))
+	gw := gzip.NewWriter(w)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	sourceFileEntries(srcDir, func(rel, abs string, info os.FileInfo) error {
+		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return nil
 		}
-		header.Name = rel
-		if err := tw.WriteHeader(header); err != nil {
+		hdr.Name = rel
+		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		f, err := os.Open(path)
+		f, err := os.Open(abs)
 		if err != nil {
 			return nil
 		}
@@ -529,8 +550,33 @@ func (h *Handlers) GetSource(w http.ResponseWriter, r *http.Request) {
 		io.Copy(tw, f)
 		return nil
 	})
+}
 
-	tw.Close()
-	gw.Close()
+func writeSourceZip(w http.ResponseWriter, deploy *store.Deployment, srcDir string) {
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.zip"`, deploy.Name))
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	sourceFileEntries(srcDir, func(rel, abs string, info os.FileInfo) error {
+		hdr, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return nil
+		}
+		// Zip archives use forward slashes regardless of host OS.
+		hdr.Name = filepath.ToSlash(rel)
+		hdr.Method = zip.Deflate
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(abs)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		io.Copy(fw, f)
+		return nil
+	})
 }
 

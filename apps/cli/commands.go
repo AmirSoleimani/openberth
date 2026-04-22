@@ -502,7 +502,10 @@ func cmdPull() {
 		os.Exit(1)
 	}
 
-	size, err := client.Download("/api/deployments/"+id+"/source", tmpFile)
+	// Pin the format to tar.gz: the server's default flipped to zip, and the
+	// CLI's extractor (extractTarball) only understands gzipped tar. Explicit
+	// format keeps future default-changes from breaking `berth pull`.
+	size, err := client.Download("/api/deployments/"+id+"/source?format=tar.gz", tmpFile)
 	if err != nil {
 		done()
 		fail(err.Error())

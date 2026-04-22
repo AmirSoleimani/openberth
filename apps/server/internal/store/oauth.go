@@ -116,8 +116,8 @@ func (s *Store) MarkOAuthCodeUsed(code string) error {
 func (s *Store) CreateOAuthToken(t *OAuthToken) error {
 	expiresAt := t.ExpiresAt.UTC().Format("2006-01-02 15:04:05")
 	_, err := s.db.Exec(
-		"INSERT INTO oauth_tokens (token, token_type, client_id, user_id, expires_at) VALUES (?, ?, ?, ?, ?)",
-		t.Token, t.TokenType, t.ClientID, t.UserID, expiresAt,
+		"INSERT INTO oauth_tokens (token, token_hash, token_type, client_id, user_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+		t.Token, s.hashToken(t.Token), t.TokenType, t.ClientID, t.UserID, expiresAt,
 	)
 	return err
 }
@@ -125,10 +125,25 @@ func (s *Store) CreateOAuthToken(t *OAuthToken) error {
 func (s *Store) GetOAuthToken(token string) (*OAuthToken, error) {
 	t := &OAuthToken{}
 	var expired int
+	hash := s.hashToken(token)
 	err := s.db.QueryRow(`
 		SELECT token, token_type, client_id, user_id,
 			CASE WHEN expires_at <= strftime('%Y-%m-%d %H:%M:%S', 'now') THEN 1 ELSE 0 END
-		FROM oauth_tokens WHERE token = ?`,
+		FROM oauth_tokens WHERE token_hash = ?`,
+		hash,
+	).Scan(&t.Token, &t.TokenType, &t.ClientID, &t.UserID, &expired)
+	if err == nil {
+		t.Expired = expired != 0
+		return t, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	// Backward-compat fallback: pre-backfill row.
+	err = s.db.QueryRow(`
+		SELECT token, token_type, client_id, user_id,
+			CASE WHEN expires_at <= strftime('%Y-%m-%d %H:%M:%S', 'now') THEN 1 ELSE 0 END
+		FROM oauth_tokens WHERE token = ? AND (token_hash IS NULL OR token_hash = '')`,
 		token,
 	).Scan(&t.Token, &t.TokenType, &t.ClientID, &t.UserID, &expired)
 	if err == sql.ErrNoRows {
@@ -138,6 +153,7 @@ func (s *Store) GetOAuthToken(token string) (*OAuthToken, error) {
 		return nil, err
 	}
 	t.Expired = expired != 0
+	s.db.Exec("UPDATE oauth_tokens SET token_hash = ? WHERE token = ? AND (token_hash IS NULL OR token_hash = '')", hash, token)
 	return t, nil
 }
 
@@ -145,12 +161,31 @@ func (s *Store) GetOAuthToken(token string) (*OAuthToken, error) {
 func (s *Store) GetUserByOAuthToken(token string) (*User, error) {
 	u := &User{}
 	var expired int
+	hash := s.hashToken(token)
 	err := s.db.QueryRow(`
 		SELECT u.id, u.name, u.api_key, u.role, u.max_deployments, u.default_ttl_hours, u.created_at,
 			CASE WHEN t.expires_at <= strftime('%Y-%m-%d %H:%M:%S', 'now') THEN 1 ELSE 0 END
 		FROM oauth_tokens t
 		JOIN users u ON u.id = t.user_id
-		WHERE t.token = ? AND t.token_type = 'access'`,
+		WHERE t.token_hash = ? AND t.token_type = 'access'`,
+		hash,
+	).Scan(&u.ID, &u.Name, &u.APIKey, &u.Role, &u.MaxDeployments, &u.DefaultTTLHours, &u.CreatedAt, &expired)
+	if err == nil {
+		if expired != 0 {
+			return nil, nil
+		}
+		return u, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	// Backward-compat fallback.
+	err = s.db.QueryRow(`
+		SELECT u.id, u.name, u.api_key, u.role, u.max_deployments, u.default_ttl_hours, u.created_at,
+			CASE WHEN t.expires_at <= strftime('%Y-%m-%d %H:%M:%S', 'now') THEN 1 ELSE 0 END
+		FROM oauth_tokens t
+		JOIN users u ON u.id = t.user_id
+		WHERE t.token = ? AND t.token_type = 'access' AND (t.token_hash IS NULL OR t.token_hash = '')`,
 		token,
 	).Scan(&u.ID, &u.Name, &u.APIKey, &u.Role, &u.MaxDeployments, &u.DefaultTTLHours, &u.CreatedAt, &expired)
 	if err == sql.ErrNoRows {
@@ -162,6 +197,7 @@ func (s *Store) GetUserByOAuthToken(token string) (*User, error) {
 	if expired != 0 {
 		return nil, nil
 	}
+	s.db.Exec("UPDATE oauth_tokens SET token_hash = ? WHERE token = ? AND (token_hash IS NULL OR token_hash = '')", hash, token)
 	return u, nil
 }
 

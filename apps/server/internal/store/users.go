@@ -16,14 +16,34 @@ type User struct {
 
 func (s *Store) GetUserByKey(apiKey string) (*User, error) {
 	u := &User{}
+	// Preferred path: index lookup by keyed hash. The plaintext column is
+	// still populated this release so a downgrade-compatible fallback is
+	// available if the hash column is missing or null for a given row.
+	hash := s.hashToken(apiKey)
 	err := s.db.QueryRow(
-		"SELECT id, name, api_key, role, max_deployments, default_ttl_hours, COALESCE(display_name,''), created_at FROM users WHERE api_key = ?",
+		"SELECT id, name, api_key, role, max_deployments, default_ttl_hours, COALESCE(display_name,''), created_at FROM users WHERE api_key_hash = ?",
+		hash,
+	).Scan(&u.ID, &u.Name, &u.APIKey, &u.Role, &u.MaxDeployments, &u.DefaultTTLHours, &u.DisplayName, &u.CreatedAt)
+	if err == nil {
+		return u, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	// Fallback: pre-backfill row where api_key_hash is NULL. Opportunistically
+	// set the hash on hit so future lookups use the indexed path.
+	err = s.db.QueryRow(
+		"SELECT id, name, api_key, role, max_deployments, default_ttl_hours, COALESCE(display_name,''), created_at FROM users WHERE api_key = ? AND (api_key_hash IS NULL OR api_key_hash = '')",
 		apiKey,
 	).Scan(&u.ID, &u.Name, &u.APIKey, &u.Role, &u.MaxDeployments, &u.DefaultTTLHours, &u.DisplayName, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return u, err
+	if err != nil {
+		return nil, err
+	}
+	s.db.Exec("UPDATE users SET api_key_hash = ? WHERE id = ? AND (api_key_hash IS NULL OR api_key_hash = '')", hash, u.ID)
+	return u, nil
 }
 
 func (s *Store) ListUsers() ([]User, error) {
@@ -44,8 +64,8 @@ func (s *Store) ListUsers() ([]User, error) {
 
 func (s *Store) CreateUser(u *User) error {
 	_, err := s.db.Exec(
-		"INSERT INTO users (id, name, api_key, role, max_deployments, default_ttl_hours, display_name, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		u.ID, u.Name, u.APIKey, u.Role, u.MaxDeployments, u.DefaultTTLHours, u.DisplayName, u.PasswordHash,
+		"INSERT INTO users (id, name, api_key, api_key_hash, role, max_deployments, default_ttl_hours, display_name, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		u.ID, u.Name, u.APIKey, s.hashToken(u.APIKey), u.Role, u.MaxDeployments, u.DefaultTTLHours, u.DisplayName, u.PasswordHash,
 	)
 	return err
 }
@@ -90,7 +110,7 @@ func (s *Store) UpdateUserDisplayName(userID, displayName string) error {
 }
 
 func (s *Store) UpdateUserAPIKey(userID, apiKey string) error {
-	_, err := s.db.Exec("UPDATE users SET api_key = ? WHERE id = ?", apiKey, userID)
+	_, err := s.db.Exec("UPDATE users SET api_key = ?, api_key_hash = ? WHERE id = ?", apiKey, s.hashToken(apiKey), userID)
 	return err
 }
 

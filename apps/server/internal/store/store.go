@@ -5,26 +5,102 @@
 package store
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"os"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	masterKey [32]byte
 }
 
-func NewStore(dbPath string) (*Store, error) {
+func NewStore(dbPath string, masterKey [32]byte) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, masterKey: masterKey}
 	if err := s.ensureSchema(); err != nil {
 		return nil, err
 	}
+	if err := s.backfillTokenHashes(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// hashToken computes a deterministic HMAC-SHA256 of a bearer token using
+// the instance master key. Used for storing and looking up API keys,
+// session tokens, and OAuth tokens without retaining the plaintext.
+//
+// Determinism is the point: the same input always yields the same hash,
+// so we can indexed-lookup a stored hash against an incoming bearer.
+func (s *Store) hashToken(token string) string {
+	if token == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, s.masterKey[:])
+	mac.Write([]byte(token))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// backfillTokenHashes populates *_hash columns for rows carried over from a
+// pre-hash release. Runs once at startup inside a single transaction;
+// idempotent (NULL-guarded) so a restart after partial success just
+// resumes. Sub-second for realistic instance sizes.
+func (s *Store) backfillTokenHashes() error {
+	type fill struct {
+		table, keyCol, hashCol string
+	}
+	fills := []fill{
+		{"users", "api_key", "api_key_hash"},
+		{"sessions", "token", "token_hash"},
+		{"oauth_tokens", "token", "token_hash"},
+	}
+	for _, f := range fills {
+		rows, err := s.db.Query("SELECT " + f.keyCol + " FROM " + f.table + " WHERE (" + f.hashCol + " IS NULL OR " + f.hashCol + " = '') AND " + f.keyCol + " IS NOT NULL AND " + f.keyCol + " != ''")
+		if err != nil {
+			// Table or column not present yet (very fresh install): skip.
+			continue
+		}
+		var keys []string
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err == nil && k != "" {
+				keys = append(keys, k)
+			}
+		}
+		rows.Close()
+		if len(keys) == 0 {
+			continue
+		}
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		stmt, err := tx.Prepare("UPDATE " + f.table + " SET " + f.hashCol + " = ? WHERE " + f.keyCol + " = ?")
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		for _, k := range keys {
+			if _, err := stmt.Exec(s.hashToken(k), k); err != nil {
+				stmt.Close()
+				tx.Rollback()
+				return err
+			}
+		}
+		stmt.Close()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ensureSchema creates all tables and runs idempotent migrations.
@@ -158,6 +234,18 @@ func (s *Store) ensureSchema() error {
 
 	// Migration: add created_by to secrets (pre-existing rows stay NULL → admin-only edit).
 	s.db.Exec("ALTER TABLE secrets ADD COLUMN created_by TEXT REFERENCES users(id)")
+
+	// Migration: hashed bearer tokens. The plaintext columns (api_key,
+	// sessions.token, oauth_tokens.token) are retained for one release so
+	// downgrade to a prior binary still works; next release stops writing
+	// them, one after drops the columns. See backfillTokenHashes for the
+	// data migration that populates the new columns for existing rows.
+	s.db.Exec("ALTER TABLE users ADD COLUMN api_key_hash TEXT")
+	s.db.Exec("ALTER TABLE sessions ADD COLUMN token_hash TEXT")
+	s.db.Exec("ALTER TABLE oauth_tokens ADD COLUMN token_hash TEXT")
+	s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash) WHERE api_key_hash IS NOT NULL AND api_key_hash != ''")
+	s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash) WHERE token_hash IS NOT NULL AND token_hash != ''")
+	s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_tokens_token_hash ON oauth_tokens(token_hash) WHERE token_hash IS NOT NULL AND token_hash != ''")
 
 	return nil
 }

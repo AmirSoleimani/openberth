@@ -20,8 +20,11 @@ func (h *Handlers) DataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract subdomain from Host header
-	host := r.Host
+	// Extract subdomain from Host header. Host names are case-insensitive per
+	// RFC 3986, but stored subdomains are always lowercase (SanitizeName) and
+	// Cfg.Domain is lowercased at config load — so normalize the incoming host
+	// before matching to avoid case-mismatch misses on forged/uppercase hosts.
+	host := strings.ToLower(r.Host)
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ContainerDefaults struct {
@@ -77,6 +78,10 @@ func LoadConfig() (*Config, error) {
 	if data, err := os.ReadFile(cfgPath); err == nil {
 		json.Unmarshal(data, cfg)
 	}
+
+	// Hostnames are case-insensitive; normalize here so every subdomain
+	// comparison elsewhere in the codebase can assume a lowercase Domain.
+	cfg.Domain = strings.ToLower(cfg.Domain)
 
 	cfg.DataDir = dataDir
 	cfg.DeploysDir = filepath.Join(dataDir, "deploys")

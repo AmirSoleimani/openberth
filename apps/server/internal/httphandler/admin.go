@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -406,6 +407,47 @@ func addDirToTar(tw *tar.Writer, srcDir, tarPrefix string) {
 	})
 }
 
+// validateStagedBackup checks that a staged backup directory carries the
+// minimum shape AdminRestore assumes: a parseable config.json and a
+// SQLite DB file. Any other file is tolerated.
+func validateStagedBackup(stagingDir string) error {
+	configPath := filepath.Join(stagingDir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("backup missing config.json: %w", err)
+	}
+	var probe map[string]interface{}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return fmt.Errorf("backup config.json is not valid JSON: %w", err)
+	}
+	dbPath := filepath.Join(stagingDir, "openberth.db")
+	if info, err := os.Stat(dbPath); err != nil || info.IsDir() || info.Size() == 0 {
+		return fmt.Errorf("backup missing or empty openberth.db")
+	}
+	return nil
+}
+
+// stagedMasterKeyMatches returns true when the master key embedded in a
+// staged backup's config.json matches the currently running key.
+func stagedMasterKeyMatches(stagingDir, liveKey string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(stagingDir, "config.json"))
+	if err != nil {
+		return false, err
+	}
+	var staged struct {
+		MasterKey string `json:"masterKey"`
+	}
+	if err := json.Unmarshal(data, &staged); err != nil {
+		return false, err
+	}
+	// Empty staged key is treated as "matching" — a fresh-install backup
+	// never had a key yet, so replacement is harmless.
+	if staged.MasterKey == "" {
+		return true, nil
+	}
+	return staged.MasterKey == liveKey, nil
+}
+
 // ── Admin: Restore ─────────────────────────────────────────────────
 
 func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
@@ -430,6 +472,7 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 
 	passphrase := r.FormValue("passphrase")
 	legacy := r.FormValue("legacyUnencrypted") == "true"
+	allowMasterKeyReplace := r.FormValue("allowMasterKeyReplace") == "true"
 
 	// Detect the backup format and unwrap if needed. The unwrapped reader
 	// then feeds the normal ExtractBackup gzip/tar pipeline.
@@ -453,6 +496,46 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Staged extract: write the archive into a sibling directory first, so
+	// validation happens before any destructive change to live data. If
+	// anything fails before the atomic swap, the live dataDir is untouched.
+	dataDir := h.svc.Cfg.DataDir
+	stagingDir := dataDir + fmt.Sprintf(".restore-%d", time.Now().UnixNano())
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		jsonErr(w, 500, "Failed to create staging dir: "+err.Error())
+		return
+	}
+	cleanupStaging := func() { os.RemoveAll(stagingDir) }
+
+	if err := service.ExtractBackup(archive, stagingDir, h.svc.Cfg.MaxBackupBytes, h.svc.Cfg.MaxBackupEntries); err != nil {
+		cleanupStaging()
+		jsonErr(w, 500, "Failed to extract backup: "+err.Error())
+		return
+	}
+
+	// Validate the staged backup before touching live data.
+	if err := validateStagedBackup(stagingDir); err != nil {
+		cleanupStaging()
+		jsonErr(w, 400, err.Error())
+		return
+	}
+
+	// Master-key guard: refuse silent key replacement unless explicitly opted
+	// in. Replacing the master key orphans every secret in the live DB.
+	sameKey, err := stagedMasterKeyMatches(stagingDir, h.svc.Cfg.MasterKey)
+	if err != nil {
+		cleanupStaging()
+		jsonErr(w, 400, "Failed to read staged config: "+err.Error())
+		return
+	}
+	if !sameKey && !allowMasterKeyReplace {
+		cleanupStaging()
+		jsonErr(w, 409, "The backup has a different master key than the running instance. Set form field allowMasterKeyReplace=true to proceed (this will replace the current master key; existing secrets encrypted with the old key become undecryptable).")
+		return
+	}
+
+	// From here on, changes are destructive.
+
 	// 1. Stop all running containers
 	deploys, _ := h.svc.Store.ListDeploymentsByStatus("running", "building", "updating")
 	for _, d := range deploys {
@@ -466,14 +549,26 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 	h.svc.DataStore.CloseAll()
 	h.svc.Store.Close()
 
-	// 4. Extract archive into dataDir
-	dataDir := h.svc.Cfg.DataDir
-	if err := service.ExtractBackup(archive, dataDir, h.svc.Cfg.MaxBackupBytes, h.svc.Cfg.MaxBackupEntries); err != nil {
-		// Try to reopen store even on error
-		h.svc.Store.Reopen(h.svc.Cfg.DBPath)
-		jsonErr(w, 500, "Failed to extract backup: "+err.Error())
+	// 4. Atomic swap: rename current dataDir aside, then staging into place.
+	// On failure, roll the aside back into place so the operator keeps live
+	// state intact. Cleanup of the asideDir only happens on full success.
+	asideDir := dataDir + fmt.Sprintf(".old-%d", time.Now().UnixNano())
+	if err := os.Rename(dataDir, asideDir); err != nil {
+		cleanupStaging()
+		h.svc.Store.Reopen(h.svc.Cfg.DBPath) // best-effort recover
+		jsonErr(w, 500, "Failed to move live dataDir aside: "+err.Error())
 		return
 	}
+	if err := os.Rename(stagingDir, dataDir); err != nil {
+		// Roll back: put the live data back in place.
+		os.Rename(asideDir, dataDir)
+		cleanupStaging()
+		h.svc.Store.Reopen(h.svc.Cfg.DBPath) // best-effort recover
+		jsonErr(w, 500, "Failed to swap staging into dataDir: "+err.Error())
+		return
+	}
+	// Post-swap cleanup of the aside dir (best-effort).
+	defer os.RemoveAll(asideDir)
 
 	// 5. Reopen store (cleans stale WAL/SHM files + runs migrations)
 	if err := h.svc.Store.Reopen(h.svc.Cfg.DBPath); err != nil {

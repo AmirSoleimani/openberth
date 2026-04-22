@@ -79,6 +79,63 @@ func volumeForDeploy(deployID string) string {
 	return fmt.Sprintf("sc-ws-%s-%d", deployID, time.Now().UnixMilli())
 }
 
+// networkForDeploy returns the per-deployment Docker network name.
+// Stable across rebuilds so a tenant's runtime and future build share
+// the same isolated bridge.
+func networkForDeploy(deployID string) string {
+	return "sc-net-" + deployID
+}
+
+// isolationEnabled reports whether the per-deployment network mode is
+// active. False means fall back to the default bridge (shared-legacy).
+func (d *Driver) isolationEnabled() bool {
+	return d.cfg.NetworkIsolation != "shared-legacy"
+}
+
+// ensureNetwork creates the per-deployment Docker network if it doesn't
+// already exist. Idempotent; safe to call on every deploy/rebuild.
+func (d *Driver) ensureNetwork(deployID string) error {
+	if !d.isolationEnabled() {
+		return nil
+	}
+	name := networkForDeploy(deployID)
+	// Check whether the network already exists; avoid "network with name
+	// already exists" errors on rebuild paths.
+	out, _ := execCmd("docker", "network", "ls", "--format", "{{.Name}}", "--filter", "name=^"+name+"$")
+	if strings.TrimSpace(out) == name {
+		return nil
+	}
+	if _, err := execCmd("docker", "network", "create",
+		"--driver", "bridge",
+		"--label", "openberth=true",
+		"--label", "openberth.id="+deployID,
+		name,
+	); err != nil {
+		return fmt.Errorf("create network: %w", err)
+	}
+	return nil
+}
+
+// removeNetwork tears down the per-deployment network. Best-effort:
+// already-gone networks, or networks with other containers still
+// attached, are logged but not fatal.
+func (d *Driver) removeNetwork(deployID string) {
+	if !d.isolationEnabled() {
+		return
+	}
+	execCmd("docker", "network", "rm", networkForDeploy(deployID))
+}
+
+// addNetworkArg appends --network=<name> to the arg list when isolation
+// is enabled. Leaves args untouched when in shared-legacy mode so old
+// deploys keep working on the default bridge.
+func (d *Driver) addNetworkArg(args []string, deployID string) []string {
+	if !d.isolationEnabled() {
+		return args
+	}
+	return append(args, "--network="+networkForDeploy(deployID))
+}
+
 // currentVolume finds the named volume currently mounted at /app for the
 // running container. Used by blue-green rebuild and secret-rotation paths.
 func (d *Driver) currentVolume(deployID string) string {

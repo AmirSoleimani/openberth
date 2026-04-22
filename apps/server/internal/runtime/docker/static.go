@@ -13,6 +13,10 @@ import (
 func (d *Driver) createStatic(opts runtime.DeployOpts, hostPort int) (*runtime.Result, error) {
 	containerName := "sc-" + opts.ID
 
+	if err := d.ensureNetwork(opts.ID); err != nil {
+		return nil, err
+	}
+
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
@@ -38,6 +42,7 @@ func (d *Driver) createStatic(opts runtime.DeployOpts, hostPort int) (*runtime.R
 	if !d.gvisorReady {
 		args = append(args, "--security-opt=no-new-privileges")
 	}
+	args = d.addNetworkArg(args, opts.ID)
 	args = append(args,
 		"--read-only",
 		"--tmpfs=/config:rw,noexec,nosuid,size=1m",
@@ -110,6 +115,7 @@ func (d *Driver) createStaticSandbox(opts runtime.SandboxOpts, hostPort int) (*r
 	if !d.gvisorReady {
 		args = append(args, "--security-opt=no-new-privileges")
 	}
+	args = d.addNetworkArg(args, opts.ID)
 	args = append(args,
 		"--tmpfs=/config:rw,noexec,nosuid,size=1m",
 		"--tmpfs=/data:rw,noexec,nosuid,size=1m",

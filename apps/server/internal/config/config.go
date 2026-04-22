@@ -64,6 +64,14 @@ type Config struct {
 	// build-secrets opt-in mechanism.
 	LegacyBuildSecrets bool `json:"legacyBuildSecrets,omitempty"`
 
+	// NetworkIsolation controls whether each deployment's build and runtime
+	// containers run on a dedicated Docker bridge network, preventing a
+	// tenant container from talking to neighbours or probing Docker's
+	// internal DNS for other deployments.
+	//   "per-deploy"    — default; one network per deployment.
+	//   "shared-legacy" — single default bridge, old behavior. Deprecated.
+	NetworkIsolation string `json:"networkIsolation,omitempty"`
+
 	// Derived paths
 	DeploysDir     string `json:"-"`
 	UploadsDir     string `json:"-"`
@@ -117,6 +125,9 @@ func LoadConfig() (*Config, error) {
 
 	if cfg.ProxySiteConfigMode == 0 {
 		cfg.ProxySiteConfigMode = 0o600
+	}
+	if cfg.NetworkIsolation == "" {
+		cfg.NetworkIsolation = "per-deploy"
 	}
 
 	// Ensure directories exist

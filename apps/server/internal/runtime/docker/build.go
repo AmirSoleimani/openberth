@@ -28,6 +28,13 @@ func (d *Driver) Deploy(opts runtime.DeployOpts) (*runtime.Result, error) {
 		return d.createStatic(opts, hostPort)
 	}
 
+	// Ensure the per-deployment network exists before either the build
+	// container or the runtime container try to join it. In shared-legacy
+	// mode this is a no-op.
+	if err := d.ensureNetwork(opts.ID); err != nil {
+		return nil, err
+	}
+
 	volumeName := volumeForDeploy(opts.ID)
 
 	log.Printf("[build] Phase 1: build %s (%s/%s)", opts.ID, opts.Language, opts.Framework)
@@ -59,6 +66,10 @@ func (d *Driver) Rebuild(opts runtime.DeployOpts) (*runtime.Result, error) {
 	p := framework.GetProvider(opts.Language)
 	if p != nil && p.StaticOnly() {
 		return d.rebuildStatic(opts)
+	}
+
+	if err := d.ensureNetwork(opts.ID); err != nil {
+		return nil, err
 	}
 
 	runnerName := "sc-" + opts.ID
@@ -109,6 +120,10 @@ func (d *Driver) RestartRuntime(opts runtime.DeployOpts) (*runtime.Result, error
 	p := framework.GetProvider(opts.Language)
 	if p != nil && p.StaticOnly() {
 		return d.rebuildStatic(opts)
+	}
+
+	if err := d.ensureNetwork(opts.ID); err != nil {
+		return nil, err
 	}
 
 	runnerName := "sc-" + opts.ID
@@ -165,6 +180,7 @@ func (d *Driver) runBuild(opts runtime.DeployOpts, volumeName string, oldVolume 
 	if !d.gvisorReady {
 		buildArgs = append(buildArgs, "--security-opt=no-new-privileges")
 	}
+	buildArgs = d.addNetworkArg(buildArgs, opts.ID)
 
 	buildArgs = append(buildArgs,
 		"-v="+volumeName+":/app:rw",
@@ -255,6 +271,7 @@ func (d *Driver) startRuntime(opts runtime.DeployOpts, volumeName string, hostPo
 	if !d.gvisorReady {
 		runArgs = append(runArgs, "--security-opt=no-new-privileges")
 	}
+	runArgs = d.addNetworkArg(runArgs, opts.ID)
 	persistDir := filepath.Join(d.cfg.PersistDir, opts.ID)
 	os.MkdirAll(persistDir, 0755)
 

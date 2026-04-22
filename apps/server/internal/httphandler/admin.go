@@ -411,7 +411,7 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Extract archive into dataDir
 	dataDir := h.svc.Cfg.DataDir
-	if err := service.ExtractBackup(file, dataDir); err != nil {
+	if err := service.ExtractBackup(file, dataDir, h.svc.Cfg.MaxBackupBytes, h.svc.Cfg.MaxBackupEntries); err != nil {
 		// Try to reopen store even on error
 		h.svc.Store.Reopen(h.svc.Cfg.DBPath)
 		jsonErr(w, 500, "Failed to extract backup: "+err.Error())

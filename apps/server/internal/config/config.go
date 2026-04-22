@@ -45,6 +45,17 @@ type Config struct {
 	// can override (e.g. 0640 with a shared group).
 	ProxySiteConfigMode int `json:"proxySiteConfigMode,omitempty"`
 
+	// MaxTarballBytes / MaxTarballEntries cap deploy-upload extraction to
+	// protect against disk-fill and inode-exhaustion attacks. 0 → use
+	// service-level defaults (see service.DefaultMaxTarBytes etc.).
+	MaxTarballBytes   int64 `json:"maxTarballBytes,omitempty"`
+	MaxTarballEntries int   `json:"maxTarballEntries,omitempty"`
+
+	// MaxBackupBytes / MaxBackupEntries cap admin-backup restore similarly.
+	// Default is intentionally larger than deploy tarballs.
+	MaxBackupBytes   int64 `json:"maxBackupBytes,omitempty"`
+	MaxBackupEntries int   `json:"maxBackupEntries,omitempty"`
+
 	// Derived paths
 	DeploysDir     string `json:"-"`
 	UploadsDir     string `json:"-"`

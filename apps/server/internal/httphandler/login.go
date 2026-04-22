@@ -229,6 +229,19 @@ func (h *Handlers) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	redirect := r.FormValue("redirect")
 	callback := r.FormValue("callback")
 
+	ip := clientIP(r)
+	if !h.loginLimiter.Allow(ip) {
+		wait := h.loginLimiter.RetryAfter(ip)
+		seconds := int(wait.Seconds())
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
+		log.Printf("[login] rate-limited %s (retry in %ds)", ip, seconds)
+		loginRedirectWithError(w, r, redirect, callback, "Too many login attempts. Try again shortly.")
+		return
+	}
+
 	// Block local login when SSO-only mode is active
 	oidcMode, _ := h.svc.Store.GetSetting("oidc.mode")
 	if oidcMode == "sso_only" {
@@ -246,15 +259,18 @@ func (h *Handlers) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.svc.Store.GetUserByName(username)
 	if err != nil || user == nil || user.PasswordHash == "" {
+		h.loginLimiter.Consume(ip)
 		loginRedirectWithError(w, r, redirect, callback, "Invalid username or password.")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		h.loginLimiter.Consume(ip)
 		loginRedirectWithError(w, r, redirect, callback, "Invalid username or password.")
 		return
 	}
 
+	h.loginLimiter.Reset(ip)
 	h.createSession(w, user.ID)
 	log.Printf("[login] User '%s' logged in", username)
 

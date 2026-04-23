@@ -17,10 +17,10 @@ import (
 
 const githubRepo = "AmirSoleimani/openberth"
 
-// releaseSigningPubKey — see apps/server/self_update.go for semantics.
-// Hex-encoded ed25519 public key (32 bytes). Empty until the release
-// signing ceremony has been performed and the real value committed.
-var releaseSigningPubKey = ""
+// releaseSigningPubKey — see apps/server/self_update.go for semantics
+// and docs/signing.md for rotation procedure. Must match the server's
+// release-signing pubkey; both binaries are signed by the same key.
+var releaseSigningPubKey = "ffd5a9dc2b0e8b4390bc98a0d0b99f4c325871f6ce7ed13514d01e9f0af0a362"
 
 func cmdUpdateCLI() {
 	fmt.Println()

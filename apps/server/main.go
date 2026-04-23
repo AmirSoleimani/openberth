@@ -194,8 +194,12 @@ func main() {
 	// MCP Streamable HTTP endpoint (all methods)
 	mux.Handle("/mcp", mcpH)
 
-	// ── CORS middleware for browser-facing paths ────────────────────
-	handler := corsMiddleware(mux)
+	// ── CSRF + CORS middleware chain ────────────────────────────────
+	// Order matters: CSRFMiddleware runs first so a cross-site POST gets
+	// 403 without ever reaching the handler; CORS then handles preflight
+	// and header emission for legit same-origin callers. Bearer-auth
+	// callers (CLI, MCP) skip CSRF entirely — see httphandler/csrf.go.
+	handler := httphandler.CSRFMiddleware(cfg, corsMiddleware(mux))
 
 	// ── Startup reconciliation ──────────────────────────────────────
 	svc.ReconcileOnStartup()

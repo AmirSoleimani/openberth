@@ -136,12 +136,17 @@ func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) *store.U
 
 // createSession generates a session token, stores it, and sets the cookie.
 //
-// The cookie is intentionally host-only (no Domain attribute) so a browser
-// will never send it to tenant subdomains. Tenant apps that need SSO auth
-// go through MintSSOToken + SSORedirect + AuthCheck instead — see C-1 in
-// the security audit plan for why the Domain=<root> shape was replaced.
-// SameSite=Strict is safe now that the cookie never needs to follow a
-// cross-subdomain redirect.
+// Host-only (no Domain attribute) so the browser never sends it to tenant
+// subdomains. That's the actual C-1 fix. Tenant apps that need SSO auth
+// go through MintSSOToken + SSORedirect + AuthCheck instead.
+//
+// SameSite=Lax (not Strict) preserves "click an OpenBerth link from an
+// external site and stay logged in" behaviour. The handoff flow for
+// protected subdomains is same-site (tenant ↔ UI share the registrable
+// domain), so both Strict and Lax work there; Lax is just friendlier for
+// external-initiated top-level navigations like email links and MCP OAuth
+// popups. CSRF protection: the API requires POST for state changes and
+// Lax blocks cross-site POST cookie delivery.
 func (h *Handlers) createSession(w http.ResponseWriter, userID string) string {
 	token := "ses_" + service.RandomHex(32)
 	expiresAt := time.Now().Add(7 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05")
@@ -154,7 +159,7 @@ func (h *Handlers) createSession(w http.ResponseWriter, userID string) string {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   7 * 24 * 60 * 60,
 	})
 	return token
@@ -172,7 +177,7 @@ func (h *Handlers) clearSession(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 }

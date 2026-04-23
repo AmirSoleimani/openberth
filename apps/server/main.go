@@ -106,6 +106,10 @@ func main() {
 	mux.HandleFunc("GET /auth/oidc/start", h.OIDCStart)
 	mux.HandleFunc("GET /auth/oidc/callback", h.OIDCCallback)
 
+	// Tenant SSO handoff — UI-side mint of short-lived per-subdomain
+	// tokens that AuthCheck validates for user-mode protected deploys.
+	mux.HandleFunc("GET /auth/sso-redirect", h.SSORedirect)
+
 	// Internal (Caddy forward_auth uses any method)
 	mux.HandleFunc("POST /internal/cleanup", h.Cleanup)
 	mux.HandleFunc("/internal/auth-check", h.AuthCheck)

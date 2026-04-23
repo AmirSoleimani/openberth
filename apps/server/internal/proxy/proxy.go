@@ -45,9 +45,12 @@ func (p *ProxyManager) buildAuthBlock(ac *AccessControl) string {
     respond @unauthorized "Unauthorized" 401
 `, ac.Hash)
 	case "user":
+		// copy_headers includes Set-Cookie so AuthCheck can issue the
+		// tenant-scoped SSO cookie on the first handoff (see
+		// httphandler.AuthCheck — C-1 fix).
 		return fmt.Sprintf(`    forward_auth localhost:%d {
         uri /internal/auth-check?subdomain=%s
-        copy_headers X-OpenBerth-User
+        copy_headers X-OpenBerth-User Set-Cookie
     }
 `, p.cfg.Port, ac.Subdomain)
 	}

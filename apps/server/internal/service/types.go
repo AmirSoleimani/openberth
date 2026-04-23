@@ -181,6 +181,9 @@ type buildStartParams struct {
 	LogPrefix    string
 	FW           *frameworkInfo
 	Port         int
+	// BuildEnvVars: env visible during the build phase (no resolved secrets).
+	// EnvVars: env visible at runtime (merged secrets + user env).
+	BuildEnvVars map[string]string
 	EnvVars      map[string]string
 	AC           *accessControlInfo
 }

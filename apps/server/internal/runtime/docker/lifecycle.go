@@ -28,6 +28,8 @@ func (d *Driver) Exec(instanceID, command string, timeout time.Duration) (runtim
 }
 
 // Destroy removes the container and any associated build volumes.
+// The per-deployment network is also torn down; already-gone networks
+// are silently ignored (best-effort).
 func (d *Driver) Destroy(instanceID string) error {
 	execCmd("docker", "rm", "-f", "sc-"+instanceID)
 	out, _ := execCmd("docker", "volume", "ls", "-q", "--filter", "name=sc-ws-"+instanceID)
@@ -36,6 +38,7 @@ func (d *Driver) Destroy(instanceID string) error {
 			execCmd("docker", "volume", "rm", "-f", vol)
 		}
 	}
+	d.removeNetwork(instanceID)
 	return nil
 }
 

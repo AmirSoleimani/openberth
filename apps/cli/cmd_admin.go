@@ -6,13 +6,34 @@ import (
 	"time"
 )
 
+// backupPassphrase returns the passphrase from --passphrase, else the
+// BERTH_BACKUP_PASSPHRASE environment variable. Passing secrets on the
+// command line leaks them to shell history; we document BERTH_BACKUP_PASSPHRASE
+// as the recommended channel.
+func backupPassphrase() string {
+	if p := getFlag("passphrase", ""); p != "" {
+		return p
+	}
+	return os.Getenv("BERTH_BACKUP_PASSPHRASE")
+}
+
 func cmdBackup() {
 	fmt.Println()
 	fmt.Printf("  %s⚓ OpenBerth Backup%s\n\n", cBold, cReset)
 
-	output := getFlag("output", fmt.Sprintf("openberth-backup-%s.tar.gz", time.Now().Format("2006-01-02")))
+	output := getFlag("output", fmt.Sprintf("openberth-backup-%s.obbk", time.Now().Format("2006-01-02")))
 
-	spin("Downloading backup")
+	pass := backupPassphrase()
+	if pass == "" {
+		fail("Backup passphrase required. Use --passphrase or set BERTH_BACKUP_PASSPHRASE.")
+		os.Exit(1)
+	}
+	if len(pass) < 12 {
+		fail("Backup passphrase must be at least 12 characters.")
+		os.Exit(1)
+	}
+
+	spin("Downloading encrypted backup")
 	client, err := NewAPIClient()
 	if err != nil {
 		done()
@@ -20,7 +41,7 @@ func cmdBackup() {
 		os.Exit(1)
 	}
 
-	size, err := client.Download("/api/admin/backup", output)
+	size, err := client.PostDownload("/api/admin/backup", map[string]string{"passphrase": pass}, output)
 	if err != nil {
 		done()
 		fail(err.Error())
@@ -28,13 +49,14 @@ func cmdBackup() {
 	}
 	done()
 
-	ok(fmt.Sprintf("Backup saved: %s%s%s (%s)", cBold, output, cReset, formatSize(size)))
+	ok(fmt.Sprintf("Encrypted backup saved: %s%s%s (%s)", cBold, output, cReset, formatSize(size)))
+	warn("Store the passphrase separately — the backup cannot be decrypted without it.")
 	fmt.Println()
 }
 
 func cmdRestore() {
 	if len(os.Args) < 3 {
-		fail("Usage: berth restore <backup-file.tar.gz>")
+		fail("Usage: berth restore <backup-file> [--passphrase <pass>] [--legacy-unencrypted]")
 		os.Exit(1)
 	}
 	backupFile := os.Args[2]
@@ -44,8 +66,20 @@ func cmdRestore() {
 		os.Exit(1)
 	}
 
+	pass := backupPassphrase()
+	legacy := getFlag("legacy-unencrypted", "") != ""
+
 	fmt.Println()
 	fmt.Printf("  %s⚓ OpenBerth Restore%s\n\n", cBold, cReset)
+
+	fields := map[string]string{}
+	if pass != "" {
+		fields["passphrase"] = pass
+	}
+	if legacy {
+		fields["legacyUnencrypted"] = "true"
+		warn("Accepting legacy unencrypted backup format.")
+	}
 
 	spin("Uploading backup and restoring")
 	client, err := NewAPIClient()
@@ -55,7 +89,7 @@ func cmdRestore() {
 		os.Exit(1)
 	}
 
-	result, err := client.UploadFile("/api/admin/restore", backupFile, "backup")
+	result, err := client.UploadFileWithFields("/api/admin/restore", backupFile, "backup", fields)
 	if err != nil {
 		done()
 		fail(err.Error())

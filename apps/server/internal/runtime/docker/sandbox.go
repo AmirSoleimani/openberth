@@ -22,6 +22,10 @@ func (d *Driver) StartSandbox(opts runtime.SandboxOpts) (*runtime.Result, error)
 		return nil, err
 	}
 
+	if err := d.ensureNetwork(opts.ID); err != nil {
+		return nil, err
+	}
+
 	p := framework.GetProvider(opts.Language)
 	if p != nil && p.StaticOnly() {
 		return d.createStaticSandbox(opts, hostPort)
@@ -64,6 +68,7 @@ func (d *Driver) StartSandbox(opts runtime.SandboxOpts) (*runtime.Result, error)
 	if !d.gvisorReady {
 		args = append(args, "--security-opt=no-new-privileges")
 	}
+	args = d.addNetworkArg(args, opts.ID)
 
 	// Bind mount code dir rw (not a Docker volume — pushes apply instantly)
 	persistDir := filepath.Join(d.cfg.PersistDir, opts.ID)

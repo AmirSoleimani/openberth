@@ -117,7 +117,7 @@ func (svc *Service) DeployCode(user *store.User, p CodeDeployParams) (*DeployRes
 		}
 	}
 	// Resolve secrets JIT for container env
-	envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
+	buildEnvVars, envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (svc *Service) DeployCode(user *store.User, p CodeDeployParams) (*DeployRes
 		CodeDir: codeDir, Subdomain: subdomain,
 		Memory: p.Memory, CPUs: p.CPUs, NetworkQuota: resolvedQuota,
 		LogPrefix: "deploy-code", FW: fwInfo(fw), Port: port,
-		EnvVars: envVars, AC: aci,
+		BuildEnvVars: buildEnvVars, EnvVars: envVars, AC: aci,
 	})
 
 	var accessMode, apiKey string

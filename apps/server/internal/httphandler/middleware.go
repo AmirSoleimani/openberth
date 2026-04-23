@@ -47,36 +47,3 @@ func authedJSON[Req any](h *Handlers, w http.ResponseWriter, r *http.Request, fn
 	jsonResp(w, 200, result)
 }
 
-// admin is the admin-gated variant of authed. Use for admin-only endpoints
-// whose inputs come from the path or query (GET, DELETE, rotate-style).
-func admin(h *Handlers, w http.ResponseWriter, r *http.Request, fn func(*store.User) (any, error)) {
-	user := h.requireAdmin(w, r)
-	if user == nil {
-		return
-	}
-	result, err := fn(user)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	jsonResp(w, 200, result)
-}
-
-// adminJSON is the admin-gated variant of authedJSON. Callers reach here only
-// when the caller is an authenticated admin.
-func adminJSON[Req any](h *Handlers, w http.ResponseWriter, r *http.Request, fn func(*store.User, Req) (any, error)) {
-	user := h.requireAdmin(w, r)
-	if user == nil {
-		return
-	}
-	req, ok := decodeJSON[Req](w, r)
-	if !ok {
-		return
-	}
-	result, err := fn(user, req)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	jsonResp(w, 200, result)
-}

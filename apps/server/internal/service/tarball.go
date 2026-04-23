@@ -16,8 +16,28 @@ import (
 	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
 )
 
+// Extraction caps used when the caller does not specify its own.
+// Individually bounded sizes protect against decompression bombs; the
+// cumulative byte cap protects against many-file disk-fill attacks;
+// the entry-count cap protects against inode exhaustion.
+const (
+	DefaultMaxTarFileBytes int64 = 100 << 20 // per single entry
+	DefaultMaxTarBytes     int64 = 2 << 30   // cumulative across all entries
+	DefaultMaxTarEntries   int   = 50_000    // total regular+directory entries
+)
+
 // ExtractTarball extracts a gzipped tar archive into destDir.
-func ExtractTarball(file io.Reader, destDir string) error {
+// maxBytes and maxEntries set cumulative caps; 0 for either means use
+// DefaultMaxTarBytes / DefaultMaxTarEntries. Individual files are always
+// capped to DefaultMaxTarFileBytes.
+func ExtractTarball(file io.Reader, destDir string, maxBytes int64, maxEntries int) error {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxTarBytes
+	}
+	if maxEntries <= 0 {
+		maxEntries = DefaultMaxTarEntries
+	}
+
 	gz, err := gzip.NewReader(file)
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
@@ -25,6 +45,8 @@ func ExtractTarball(file io.Reader, destDir string) error {
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
+	var totalBytes int64
+	var entries int
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -32,6 +54,11 @@ func ExtractTarball(file io.Reader, destDir string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("tar: %w", err)
+		}
+
+		entries++
+		if entries > maxEntries {
+			return fmt.Errorf("tar: archive exceeds entry cap (%d > %d)", entries, maxEntries)
 		}
 
 		// Security: prevent path traversal
@@ -45,17 +72,27 @@ func ExtractTarball(file io.Reader, destDir string) error {
 		case tar.TypeDir:
 			os.MkdirAll(target, 0755)
 		case tar.TypeReg:
+			// Refuse before opening the file so a crafted archive can't fill disk
+			// one entry at a time by summing just-under-per-file-cap entries.
+			if totalBytes+hdr.Size > maxBytes {
+				return fmt.Errorf("tar: archive exceeds cumulative byte cap (%d > %d)", totalBytes+hdr.Size, maxBytes)
+			}
+
 			os.MkdirAll(filepath.Dir(target), 0755)
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
 			if err != nil {
 				return err
 			}
-			// Limit file size to 100MB to prevent decompression bombs
-			if _, err := io.Copy(f, io.LimitReader(tr, 100<<20)); err != nil {
+			n, err := io.Copy(f, io.LimitReader(tr, DefaultMaxTarFileBytes))
+			if err != nil {
 				f.Close()
 				return err
 			}
 			f.Close()
+			totalBytes += n
+			if totalBytes > maxBytes {
+				return fmt.Errorf("tar: archive exceeds cumulative byte cap (%d > %d)", totalBytes, maxBytes)
+			}
 		default:
 			// Reject symlinks, hard links, and device files
 			log.Printf("[tar] Skipping non-regular entry type=%d: %s", hdr.Typeflag, hdr.Name)
@@ -65,9 +102,22 @@ func ExtractTarball(file io.Reader, destDir string) error {
 	return nil
 }
 
+// Per-file cap for backup entries — backups may legitimately contain a
+// multi-GB SQLite DB, so the per-entry cap is larger than for deploy tarballs.
+const DefaultMaxBackupFileBytes int64 = 10 << 30 // 10 GiB per entry
+
 // ExtractBackup extracts a tar.gz backup into the data directory.
-// Validates paths to prevent path traversal.
-func ExtractBackup(file io.Reader, dataDir string) error {
+// Validates paths to prevent path traversal. Applies the same
+// cumulative/entry caps as ExtractTarball unless the caller overrides.
+func ExtractBackup(file io.Reader, dataDir string, maxBytes int64, maxEntries int) error {
+	if maxBytes <= 0 {
+		// Backups are larger than deploy tarballs; use a roomier default.
+		maxBytes = 50 << 30 // 50 GiB
+	}
+	if maxEntries <= 0 {
+		maxEntries = 1_000_000
+	}
+
 	gz, err := gzip.NewReader(file)
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
@@ -76,6 +126,8 @@ func ExtractBackup(file io.Reader, dataDir string) error {
 
 	tr := tar.NewReader(gz)
 	cleanBase := filepath.Clean(dataDir)
+	var totalBytes int64
+	var entries int
 
 	for {
 		hdr, err := tr.Next()
@@ -84,6 +136,11 @@ func ExtractBackup(file io.Reader, dataDir string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("tar: %w", err)
+		}
+
+		entries++
+		if entries > maxEntries {
+			return fmt.Errorf("tar: backup exceeds entry cap (%d > %d)", entries, maxEntries)
 		}
 
 		// Security: validate path
@@ -101,16 +158,24 @@ func ExtractBackup(file io.Reader, dataDir string) error {
 		case tar.TypeDir:
 			os.MkdirAll(target, 0755)
 		case tar.TypeReg:
+			if totalBytes+hdr.Size > maxBytes {
+				return fmt.Errorf("tar: backup exceeds cumulative byte cap (%d > %d)", totalBytes+hdr.Size, maxBytes)
+			}
 			os.MkdirAll(filepath.Dir(target), 0755)
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
 			if err != nil {
 				return fmt.Errorf("create file %s: %w", clean, err)
 			}
-			if _, err := io.Copy(f, io.LimitReader(tr, 1<<30)); err != nil {
+			n, err := io.Copy(f, io.LimitReader(tr, DefaultMaxBackupFileBytes))
+			if err != nil {
 				f.Close()
 				return fmt.Errorf("write file %s: %w", clean, err)
 			}
 			f.Close()
+			totalBytes += n
+			if totalBytes > maxBytes {
+				return fmt.Errorf("tar: backup exceeds cumulative byte cap (%d > %d)", totalBytes, maxBytes)
+			}
 		}
 	}
 	return nil
@@ -130,7 +195,7 @@ func (svc *Service) DeployTarball(user *store.User, p TarballDeployParams) (*Dep
 	codeDir := filepath.Join(svc.Cfg.DeploysDir, id)
 	os.MkdirAll(codeDir, 0755)
 
-	if err := ExtractTarball(p.File, codeDir); err != nil {
+	if err := ExtractTarball(p.File, codeDir, svc.Cfg.MaxTarballBytes, svc.Cfg.MaxTarballEntries); err != nil {
 		os.RemoveAll(codeDir)
 		return nil, ErrBadRequest("Failed to extract tarball: " + err.Error())
 	}
@@ -142,7 +207,7 @@ func (svc *Service) DeployTarball(user *store.User, p TarballDeployParams) (*Dep
 
 	ttlHours := ParseTTL(p.TTL, user.DefaultTTLHours)
 	userEnv := ensureEnv(p.EnvVars)
-	envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
+	buildEnvVars, envVars, err := svc.mergeEnvAndSecrets(user.ID, userEnv, p.Secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +243,7 @@ func (svc *Service) DeployTarball(user *store.User, p TarballDeployParams) (*Dep
 		CodeDir: codeDir, Subdomain: subdomain,
 		Memory: p.Memory, CPUs: p.CPUs, NetworkQuota: resolvedQuota,
 		LogPrefix: "deploy", FW: fwInfo(fw), Port: port,
-		EnvVars: envVars, AC: aci,
+		BuildEnvVars: buildEnvVars, EnvVars: envVars, AC: aci,
 	})
 
 	var accessMode, apiKey string
@@ -202,7 +267,7 @@ func (svc *Service) UpdateTarball(user *store.User, p TarballUpdateParams) (*Upd
 	}
 
 	codeDir := filepath.Join(svc.Cfg.DeploysDir, deploy.ID)
-	if err := ExtractTarball(p.File, codeDir); err != nil {
+	if err := ExtractTarball(p.File, codeDir, svc.Cfg.MaxTarballBytes, svc.Cfg.MaxTarballEntries); err != nil {
 		return nil, ErrBadRequest("Failed to extract: " + err.Error())
 	}
 

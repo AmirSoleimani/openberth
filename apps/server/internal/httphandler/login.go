@@ -6,6 +6,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -18,9 +19,24 @@ import (
 // ── Redirect validation ──────────────────────────────────────────
 
 // isLocalRedirect returns true if the URL is a relative path (e.g. "/gallery/").
-// Rejects absolute URLs, protocol-relative URLs (//evil.com), and empty strings.
+// Rejects absolute URLs, protocol-relative URLs (//evil.com, /\evil.com),
+// URLs containing backslashes (some browsers normalize to /), and anything
+// that parses with a host or scheme.
 func isLocalRedirect(u string) bool {
-	return u != "" && u[0] == '/' && (len(u) == 1 || u[1] != '/')
+	if u == "" || u[0] != '/' {
+		return false
+	}
+	if strings.HasPrefix(u, "//") || strings.HasPrefix(u, "/\\") {
+		return false
+	}
+	if strings.ContainsRune(u, '\\') {
+		return false
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host != "" || parsed.Scheme != "" {
+		return false
+	}
+	return true
 }
 
 // isAllowedCallback returns true if the callback URL is safe for the CLI OAuth flow.
@@ -54,8 +70,9 @@ func (h *Handlers) SetupPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	callback := r.URL.Query().Get("callback")
+	redirect := r.URL.Query().Get("redirect")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, setupPageHTML, html.EscapeString(callback))
+	fmt.Fprintf(w, setupPageHTML, html.EscapeString(redirect), html.EscapeString(callback))
 }
 
 func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +87,7 @@ func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	confirm := r.FormValue("confirm")
 	callback := r.FormValue("callback")
+	redirect := r.FormValue("redirect")
 
 	if username == "" || password == "" {
 		setupError(w, "Username and password are required.")
@@ -116,6 +134,13 @@ func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if callback != "" && isAllowedCallback(callback) {
 		h.redirectWithLoginCode(w, r, user.ID, callback)
+		return
+	}
+	// If setup was initiated from an OAuth consent flow (e.g. MCP login on
+	// a fresh --no-web install), land on the OAuth endpoint so the client
+	// finishes its authorization. Only safe-relative paths accepted.
+	if redirect != "" && isLocalRedirect(redirect) {
+		http.Redirect(w, r, redirect, http.StatusFound)
 		return
 	}
 
@@ -213,6 +238,19 @@ func (h *Handlers) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 	redirect := r.FormValue("redirect")
 	callback := r.FormValue("callback")
 
+	ip := clientIP(r)
+	if !h.loginLimiter.Allow(ip) {
+		wait := h.loginLimiter.RetryAfter(ip)
+		seconds := int(wait.Seconds())
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
+		log.Printf("[login] rate-limited %s (retry in %ds)", ip, seconds)
+		loginRedirectWithError(w, r, redirect, callback, "Too many login attempts. Try again shortly.")
+		return
+	}
+
 	// Block local login when SSO-only mode is active
 	oidcMode, _ := h.svc.Store.GetSetting("oidc.mode")
 	if oidcMode == "sso_only" {
@@ -230,15 +268,18 @@ func (h *Handlers) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.svc.Store.GetUserByName(username)
 	if err != nil || user == nil || user.PasswordHash == "" {
+		h.loginLimiter.Consume(ip)
 		loginRedirectWithError(w, r, redirect, callback, "Invalid username or password.")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		h.loginLimiter.Consume(ip)
 		loginRedirectWithError(w, r, redirect, callback, "Invalid username or password.")
 		return
 	}
 
+	h.loginLimiter.Reset(ip)
 	h.createSession(w, user.ID)
 	log.Printf("[login] User '%s' logged in", username)
 
@@ -485,6 +526,7 @@ const setupPageHTML = `<!DOCTYPE html>
   <h1>OpenBerth</h1>
   <p class="subtitle">Create your admin account to get started.</p>
   <form method="POST" action="/setup">
+    <input type="hidden" name="redirect" value="%s">
     <input type="hidden" name="callback" value="%s">
     <div class="form-group">
       <label for="username">Username</label>

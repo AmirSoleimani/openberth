@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type ContainerDefaults struct {
@@ -36,6 +37,40 @@ type Config struct {
 	Insecure        bool              `json:"insecure"`
 	WebDisabled     bool              `json:"webDisabled"`
 	MasterKey       string            `json:"masterKey"`
+
+	// ProxySiteConfigMode sets the file mode for Caddy site-config files
+	// written under CaddySitesDir. Defaults to 0600 — those files embed
+	// basic-auth hashes and api-key secrets and must not be world-readable.
+	// Operators whose Caddy runs as a non-root user that cannot read 0600
+	// can override (e.g. 0640 with a shared group).
+	ProxySiteConfigMode int `json:"proxySiteConfigMode,omitempty"`
+
+	// MaxTarballBytes / MaxTarballEntries cap deploy-upload extraction to
+	// protect against disk-fill and inode-exhaustion attacks. 0 → use
+	// service-level defaults (see service.DefaultMaxTarBytes etc.).
+	MaxTarballBytes   int64 `json:"maxTarballBytes,omitempty"`
+	MaxTarballEntries int   `json:"maxTarballEntries,omitempty"`
+
+	// MaxBackupBytes / MaxBackupEntries cap admin-backup restore similarly.
+	// Default is intentionally larger than deploy tarballs.
+	MaxBackupBytes   int64 `json:"maxBackupBytes,omitempty"`
+	MaxBackupEntries int   `json:"maxBackupEntries,omitempty"`
+
+	// LegacyBuildSecrets restores the pre-hardening behavior where user
+	// secrets were injected into the build container as env vars. Leaks
+	// those values to any postinstall script in any dependency. Deprecated:
+	// this flag will be removed in a future release — tenants should move
+	// any build-time secret usage to runtime, or petition for a dedicated
+	// build-secrets opt-in mechanism.
+	LegacyBuildSecrets bool `json:"legacyBuildSecrets,omitempty"`
+
+	// NetworkIsolation controls whether each deployment's build and runtime
+	// containers run on a dedicated Docker bridge network, preventing a
+	// tenant container from talking to neighbours or probing Docker's
+	// internal DNS for other deployments.
+	//   "per-deploy"    — default; one network per deployment.
+	//   "shared-legacy" — single default bridge, old behavior. Deprecated.
+	NetworkIsolation string `json:"networkIsolation,omitempty"`
 
 	// Derived paths
 	DeploysDir     string `json:"-"`
@@ -71,6 +106,10 @@ func LoadConfig() (*Config, error) {
 		json.Unmarshal(data, cfg)
 	}
 
+	// Hostnames are case-insensitive; normalize here so every subdomain
+	// comparison elsewhere in the codebase can assume a lowercase Domain.
+	cfg.Domain = strings.ToLower(cfg.Domain)
+
 	cfg.DataDir = dataDir
 	cfg.DeploysDir = filepath.Join(dataDir, "deploys")
 	cfg.UploadsDir = filepath.Join(dataDir, "uploads")
@@ -83,6 +122,13 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.PersistDir = filepath.Join(dataDir, "persist")
 	cfg.CaddyAccessLog = "/var/log/caddy/access.json"
+
+	if cfg.ProxySiteConfigMode == 0 {
+		cfg.ProxySiteConfigMode = 0o600
+	}
+	if cfg.NetworkIsolation == "" {
+		cfg.NetworkIsolation = "per-deploy"
+	}
 
 	// Ensure directories exist
 	for _, d := range []string{cfg.DeploysDir, cfg.UploadsDir, cfg.CaddySitesDir, cfg.PersistDir} {

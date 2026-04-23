@@ -47,7 +47,11 @@ func main() {
 	}
 
 	// Initialize store
-	dataStore, err := store.NewStore(cfg.DBPath)
+	masterKey, err := cfg.GetMasterKeyBytes()
+	if err != nil {
+		log.Fatalf("Failed to decode master key: %v", err)
+	}
+	dataStore, err := store.NewStore(cfg.DBPath, masterKey)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -59,6 +63,12 @@ func main() {
 		log.Fatalf("Runtime init: %v", err)
 	}
 	pm := proxy.NewProxyManager(cfg)
+	pm.NormalizeSiteFileModes()
+	// One-shot migration: patch any pre-C-1 user-mode site configs so their
+	// forward_auth relays Set-Cookie from the new SSO handoff. Without this
+	// protected deploys would infinite-redirect until the config is rewritten
+	// by a deploy/update cycle. Idempotent — already-patched configs skip.
+	pm.UpgradeSiteConfigsForSSO()
 	ds := datastore.NewManager(cfg.PersistDir)
 	defer ds.Close()
 
@@ -84,19 +94,26 @@ func main() {
 	mux.HandleFunc("POST /api/me/password", h.ChangePassword)
 	mux.HandleFunc("POST /api/me/rotate-key", h.RotateAPIKey)
 
-	// Browser-facing pages (gallery SPA + login + setup + root redirect).
-	// Disabled when cfg.WebDisabled is true for API/CLI/OIDC-only deployments.
+	// Auth pages always render, even with --no-web. First-time setup, local
+	// password login, and the SSO handoff are part of the OAuth / OIDC flow
+	// any MCP client needs — disabling the gallery shouldn't lock operators
+	// out of the server. Only the gallery SPA and its root landing page are
+	// gated (below + `/gallery/` further down).
+	mux.HandleFunc("GET /setup", h.SetupPage)
+	mux.HandleFunc("POST /setup", h.SetupSubmit)
+	mux.HandleFunc("GET /login", h.LoginPage)
+	mux.HandleFunc("POST /login", h.LoginSubmit)
 	if !cfg.WebDisabled {
 		mux.HandleFunc("GET /{$}", h.Index)
-		mux.HandleFunc("GET /setup", h.SetupPage)
-		mux.HandleFunc("POST /setup", h.SetupSubmit)
-		mux.HandleFunc("GET /login", h.LoginPage)
-		mux.HandleFunc("POST /login", h.LoginSubmit)
 	}
 
 	// OIDC/SSO
 	mux.HandleFunc("GET /auth/oidc/start", h.OIDCStart)
 	mux.HandleFunc("GET /auth/oidc/callback", h.OIDCCallback)
+
+	// Tenant SSO handoff — UI-side mint of short-lived per-subdomain
+	// tokens that AuthCheck validates for user-mode protected deploys.
+	mux.HandleFunc("GET /auth/sso-redirect", h.SSORedirect)
 
 	// Internal (Caddy forward_auth uses any method)
 	mux.HandleFunc("POST /internal/cleanup", h.Cleanup)
@@ -182,8 +199,12 @@ func main() {
 	// MCP Streamable HTTP endpoint (all methods)
 	mux.Handle("/mcp", mcpH)
 
-	// ── CORS middleware for browser-facing paths ────────────────────
-	handler := corsMiddleware(mux)
+	// ── CSRF + CORS middleware chain ────────────────────────────────
+	// Order matters: CSRFMiddleware runs first so a cross-site POST gets
+	// 403 without ever reaching the handler; CORS then handles preflight
+	// and header emission for legit same-origin callers. Bearer-auth
+	// callers (CLI, MCP) skip CSRF entirely — see httphandler/csrf.go.
+	handler := httphandler.CSRFMiddleware(cfg, corsMiddleware(mux))
 
 	// ── Startup reconciliation ──────────────────────────────────────
 	svc.ReconcileOnStartup()

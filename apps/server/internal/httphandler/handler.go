@@ -11,13 +11,18 @@ import (
 
 // Handlers holds HTTP handler methods. All handlers share the service layer.
 type Handlers struct {
-	svc     *service.Service
-	version string
+	svc          *service.Service
+	version      string
+	loginLimiter *rateLimiter
 }
 
 // NewHandlers creates a new Handlers instance.
 func NewHandlers(svc *service.Service, version string) *Handlers {
-	return &Handlers{svc: svc, version: version}
+	return &Handlers{
+		svc:          svc,
+		version:      version,
+		loginLimiter: newLoginRateLimiter(),
+	}
 }
 
 // jsonResp writes a JSON response with the given status code.

@@ -49,6 +49,12 @@ func authedJSON[Req any](h *Handlers, w http.ResponseWriter, r *http.Request, fn
 
 // admin is the admin-gated variant of authed. Use for admin-only endpoints
 // whose inputs come from the path or query (GET, DELETE, rotate-style).
+//
+// No caller yet — kept alongside authed/authedJSON/adminJSON so the four
+// helpers form a shape-matched matrix ready for the next admin handler
+// refactor. Remove once a caller lands if it's still unused.
+//
+//nolint:unused // intentional scaffolding; see comment above
 func admin(h *Handlers, w http.ResponseWriter, r *http.Request, fn func(*store.User) (any, error)) {
 	user := h.requireAdmin(w, r)
 	if user == nil {
@@ -64,6 +70,10 @@ func admin(h *Handlers, w http.ResponseWriter, r *http.Request, fn func(*store.U
 
 // adminJSON is the admin-gated variant of authedJSON. Callers reach here only
 // when the caller is an authenticated admin.
+//
+// No caller yet — same rationale as `admin` above.
+//
+//nolint:unused // intentional scaffolding; see comment above
 func adminJSON[Req any](h *Handlers, w http.ResponseWriter, r *http.Request, fn func(*store.User, Req) (any, error)) {
 	user := h.requireAdmin(w, r)
 	if user == nil {

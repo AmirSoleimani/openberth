@@ -138,54 +138,6 @@ func createTarball(projectDir, outputPath string) (int, error) {
 	return fileCount, err
 }
 
-// extractTarball extracts a .tar.gz file to a destination directory.
-func extractTarball(tarPath, destDir string) error {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		return fmt.Errorf("open tarball: %w", err)
-	}
-	defer f.Close()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("tar: %w", err)
-		}
-
-		// Security: prevent path traversal
-		target := filepath.Join(destDir, hdr.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
-			continue
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			os.MkdirAll(target, 0755)
-		case tar.TypeReg:
-			os.MkdirAll(filepath.Dir(target), 0755)
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, io.LimitReader(tr, 100<<20)); err != nil {
-				out.Close()
-				return err
-			}
-			out.Close()
-		}
-	}
-	return nil
-}
 
 func formatSize(bytes int64) string {
 	if bytes < 1024 {

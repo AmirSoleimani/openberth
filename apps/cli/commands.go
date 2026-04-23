@@ -483,18 +483,19 @@ func cmdPull() {
 		info(fmt.Sprintf("Pulling source for %s%s%s from .berth.json", cBold, id, cReset))
 	}
 
-	output := getFlag("output", ".")
-	output, _ = filepath.Abs(output)
-	os.MkdirAll(output, 0755)
+	// --output selects the directory in which to drop the archive. The
+	// filename comes from the server's Content-Disposition header, so the
+	// user's local file lands with the same shape they'd get from a browser
+	// download. --format passes through to the server (zip default; tar.gz,
+	// tgz, tar, or json also accepted by the endpoint).
+	outputDir := getFlag("output", ".")
+	outputDir, _ = filepath.Abs(outputDir)
+	format := getFlag("format", "")
 
 	fmt.Println()
 	fmt.Printf("  %s⚓ OpenBerth Pull%s\n\n", cBold, cReset)
 
-	// Download tarball to temp file
-	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("openberth-pull-%s.tar.gz", id))
-	defer os.Remove(tmpFile)
-
-	spin("Downloading source code")
+	spin("Downloading source")
 	client, err := NewAPIClient()
 	if err != nil {
 		done()
@@ -502,7 +503,16 @@ func cmdPull() {
 		os.Exit(1)
 	}
 
-	size, err := client.Download("/api/deployments/"+id+"/source", tmpFile)
+	path := "/api/deployments/" + id + "/source"
+	if format != "" {
+		path += "?format=" + format
+	}
+	fallback := fmt.Sprintf("openberth-%s-source.zip", id)
+	if format == "tar.gz" || format == "tgz" || format == "tar" {
+		fallback = fmt.Sprintf("openberth-%s-source.tar.gz", id)
+	}
+
+	savedPath, size, err := client.DownloadToDir(path, outputDir, fallback)
 	if err != nil {
 		done()
 		fail(err.Error())
@@ -510,16 +520,8 @@ func cmdPull() {
 	}
 	done()
 
-	// Extract to output dir
-	spin("Extracting files")
-	if err := extractTarball(tmpFile, output); err != nil {
-		done()
-		fail("Extract failed: " + err.Error())
-		os.Exit(1)
-	}
-	done()
-
-	ok(fmt.Sprintf("Source code downloaded to %s%s%s (%s)", cBold, output, cReset, formatSize(size)))
+	ok(fmt.Sprintf("Saved %s%s%s (%s)", cBold, savedPath, cReset, formatSize(size)))
+	info("Extract with `unzip` or `tar xzf` depending on the archive format.")
 	fmt.Println()
 }
 
@@ -782,9 +784,10 @@ func cmdList() {
 		}
 
 		statusColor := cYellow
-		if status == "running" {
+		switch status {
+		case "running":
 			statusColor = cGreen
-		} else if status == "failed" {
+		case "failed":
 			statusColor = cRed
 		}
 

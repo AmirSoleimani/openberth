@@ -74,6 +74,7 @@ func (svc *Service) GetDeployment(user *store.User, id string) (*DeployInfo, err
 		ExpiresAt:       deploy.ExpiresAt,
 		TTLHours:        deploy.TTLHours,
 		OwnerID:         deploy.UserID,
+		OwnerName:       deploy.OwnerName,
 		AccessMode:      deploy.AccessMode,
 		AccessUser:      deploy.AccessUser,
 		AccessUsers:     deploy.AccessUsers,

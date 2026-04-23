@@ -55,6 +55,69 @@ jobs:
           GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-X main.version=${{ github.ref_name }}" -o ../../dist/berth-mcp-darwin-arm64 .
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X main.version=${{ github.ref_name }}" -o ../../dist/berth-mcp-windows-amd64.exe .
 
+      # ── Sign artifacts ──
+      # Writes <artifact>.sig for every binary in dist/ using the ed25519
+      # private key stored as the RELEASE_SIGNING_PRIVATE_KEY secret.
+      # Clients verify against releaseSigningPubKey compiled into the
+      # server and CLI binaries — see apps/server/self_update.go and
+      # docs/signing.md. Missing secret → step fails, release aborts.
+      - name: Sign artifacts
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_PRIVATE_KEY secret is not set — refusing to ship unsigned binaries."
+            exit 1
+          fi
+          cat > /tmp/sign.go <<'GOEOF'
+          package main
+
+          import (
+              "crypto/ed25519"
+              "encoding/hex"
+              "fmt"
+              "os"
+              "path/filepath"
+              "strings"
+          )
+
+          func main() {
+              priv, err := hex.DecodeString(os.Getenv("RELEASE_SIGNING_PRIVATE_KEY"))
+              if err != nil || len(priv) != ed25519.PrivateKeySize {
+                  fmt.Fprintln(os.Stderr, "malformed RELEASE_SIGNING_PRIVATE_KEY: must be hex-encoded 64-byte ed25519 private key")
+                  os.Exit(1)
+              }
+              entries, err := os.ReadDir("dist")
+              if err != nil {
+                  fmt.Fprintln(os.Stderr, err)
+                  os.Exit(1)
+              }
+              for _, e := range entries {
+                  if e.IsDir() {
+                      continue
+                  }
+                  name := e.Name()
+                  if strings.HasSuffix(name, ".sig") || name == "checksums.txt" {
+                      continue
+                  }
+                  path := filepath.Join("dist", name)
+                  data, err := os.ReadFile(path)
+                  if err != nil {
+                      fmt.Fprintln(os.Stderr, err)
+                      os.Exit(1)
+                  }
+                  sig := ed25519.Sign(ed25519.PrivateKey(priv), data)
+                  if err := os.WriteFile(path+".sig", sig, 0o644); err != nil {
+                      fmt.Fprintln(os.Stderr, err)
+                      os.Exit(1)
+                  }
+                  fmt.Printf("signed %s\n", name)
+              }
+          }
+          GOEOF
+          go run /tmp/sign.go
+          rm /tmp/sign.go
+
       # ── Checksums ──
       - name: Generate checksums
         run: cd dist && sha256sum * > checksums.txt

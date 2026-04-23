@@ -18,18 +18,15 @@ import (
 const githubRepo = "AmirSoleimani/openberth"
 
 // releaseSigningPubKey is the ed25519 public key that signs release
-// artifacts. Hex-encoded (64 chars = 32 bytes). Empty at boot until the
-// release signing ceremony has been performed and the real key is
-// committed — the update path refuses to run without a configured key.
+// artifacts. Hex-encoded (64 chars = 32 bytes). The release CI signs
+// each binary with the matching private key (stored as a GitHub Actions
+// secret — see docs/signing.md) and publishes <artifact>.sig alongside.
 //
-// Operators generate a keypair ONCE with:
-//
-//	openssl genpkey -algorithm Ed25519 -out release-priv.pem
-//	# extract raw 32-byte public key (see docs/signing.md) and paste here
-//
-// Private key stays in an offline-friendly secret store; each release
-// CI run signs the artifact with it and publishes <artifact>.sig alongside.
-var releaseSigningPubKey = ""
+// Rotation procedure: generate a new keypair, replace this constant,
+// update the secret, ship a release signed with the new key, announce
+// the rotation. Clients that already trust the old key need to upgrade
+// to a binary carrying the new one before the private key is retired.
+var releaseSigningPubKey = "ffd5a9dc2b0e8b4390bc98a0d0b99f4c325871f6ce7ed13514d01e9f0af0a362"
 
 func selfUpdate(args []string) {
 	checkOnly := false

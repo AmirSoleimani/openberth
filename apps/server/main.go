@@ -64,6 +64,11 @@ func main() {
 	}
 	pm := proxy.NewProxyManager(cfg)
 	pm.NormalizeSiteFileModes()
+	// One-shot migration: patch any pre-C-1 user-mode site configs so their
+	// forward_auth relays Set-Cookie from the new SSO handoff. Without this
+	// protected deploys would infinite-redirect until the config is rewritten
+	// by a deploy/update cycle. Idempotent — already-patched configs skip.
+	pm.UpgradeSiteConfigsForSSO()
 	ds := datastore.NewManager(cfg.PersistDir)
 	defer ds.Close()
 

@@ -194,6 +194,50 @@ func (p *ProxyManager) NormalizeSiteFileModes() {
 	}
 }
 
+// UpgradeSiteConfigsForSSO rewrites existing .caddy files that were created
+// by a pre-C-1 binary so their user-mode forward_auth block relays the new
+// tenant-scoped Set-Cookie header back to the browser. Without this the SSO
+// handoff AuthCheck installs on first visit gets silently dropped by Caddy,
+// and the tenant immediately redirects back through /auth/sso-redirect —
+// producing an infinite redirect loop on any protected deploy whose config
+// predates the upgrade.
+//
+// The patch is a precise line-level replacement (exact string match, not a
+// regex) so custom-edited configs aren't touched outside the one line we
+// shipped. Running the function against an already-upgraded file is a no-op
+// — the target line doesn't exist any more, the scan skips it, nothing is
+// written. Caddy is reloaded once at the end if any file changed.
+func (p *ProxyManager) UpgradeSiteConfigsForSSO() {
+	entries, err := os.ReadDir(p.cfg.CaddySitesDir)
+	if err != nil {
+		return
+	}
+	const oldLine = "        copy_headers X-OpenBerth-User\n"
+	const newLine = "        copy_headers X-OpenBerth-User Set-Cookie\n"
+	changed := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".caddy" {
+			continue
+		}
+		path := filepath.Join(p.cfg.CaddySitesDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(string(data), oldLine) {
+			continue
+		}
+		patched := strings.Replace(string(data), oldLine, newLine, 1)
+		if err := os.WriteFile(path, []byte(patched), os.FileMode(p.cfg.ProxySiteConfigMode)); err != nil {
+			continue
+		}
+		changed++
+	}
+	if changed > 0 {
+		p.reload()
+	}
+}
+
 // RemoveAllRoutes removes all .caddy files from the sites directory and reloads Caddy.
 // Used before restore to clean slate.
 func (p *ProxyManager) RemoveAllRoutes() {

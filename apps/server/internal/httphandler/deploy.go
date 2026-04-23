@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AmirSoleimani/openberth/apps/server/internal/service"
 	"github.com/AmirSoleimani/openberth/apps/server/internal/store"
@@ -525,9 +526,20 @@ func sourceFileEntries(srcDir string, visit func(relPath, absPath string, info o
 	})
 }
 
+// sourceArchiveBase returns the stem used in the Content-Disposition filename
+// for source archives. Uses the human-readable deploy.Name when present;
+// falls back to `ob-<id>-YYYY-MM-DD` for records missing a name (older rows
+// from before the identity generator always populated it).
+func sourceArchiveBase(deploy *store.Deployment) string {
+	if deploy.Name != "" {
+		return deploy.Name
+	}
+	return fmt.Sprintf("ob-%s-%s", deploy.ID, time.Now().UTC().Format("2006-01-02"))
+}
+
 func writeSourceTarGz(w http.ResponseWriter, deploy *store.Deployment, srcDir string) {
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.tar.gz"`, deploy.Name))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.tar.gz"`, sourceArchiveBase(deploy)))
 	gw := gzip.NewWriter(w)
 	defer gw.Close()
 	tw := tar.NewWriter(gw)
@@ -554,7 +566,7 @@ func writeSourceTarGz(w http.ResponseWriter, deploy *store.Deployment, srcDir st
 
 func writeSourceZip(w http.ResponseWriter, deploy *store.Deployment, srcDir string) {
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.zip"`, deploy.Name))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-source.zip"`, sourceArchiveBase(deploy)))
 	zw := zip.NewWriter(w)
 	defer zw.Close()
 

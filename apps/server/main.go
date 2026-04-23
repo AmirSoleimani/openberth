@@ -64,6 +64,11 @@ func main() {
 	}
 	pm := proxy.NewProxyManager(cfg)
 	pm.NormalizeSiteFileModes()
+	// One-shot migration: patch any pre-C-1 user-mode site configs so their
+	// forward_auth relays Set-Cookie from the new SSO handoff. Without this
+	// protected deploys would infinite-redirect until the config is rewritten
+	// by a deploy/update cycle. Idempotent — already-patched configs skip.
+	pm.UpgradeSiteConfigsForSSO()
 	ds := datastore.NewManager(cfg.PersistDir)
 	defer ds.Close()
 
@@ -105,6 +110,10 @@ func main() {
 	// OIDC/SSO
 	mux.HandleFunc("GET /auth/oidc/start", h.OIDCStart)
 	mux.HandleFunc("GET /auth/oidc/callback", h.OIDCCallback)
+
+	// Tenant SSO handoff — UI-side mint of short-lived per-subdomain
+	// tokens that AuthCheck validates for user-mode protected deploys.
+	mux.HandleFunc("GET /auth/sso-redirect", h.SSORedirect)
 
 	// Internal (Caddy forward_auth uses any method)
 	mux.HandleFunc("POST /internal/cleanup", h.Cleanup)
@@ -190,8 +199,12 @@ func main() {
 	// MCP Streamable HTTP endpoint (all methods)
 	mux.Handle("/mcp", mcpH)
 
-	// ── CORS middleware for browser-facing paths ────────────────────
-	handler := corsMiddleware(mux)
+	// ── CSRF + CORS middleware chain ────────────────────────────────
+	// Order matters: CSRFMiddleware runs first so a cross-site POST gets
+	// 403 without ever reaching the handler; CORS then handles preflight
+	// and header emission for legit same-origin callers. Bearer-auth
+	// callers (CLI, MCP) skip CSRF entirely — see httphandler/csrf.go.
+	handler := httphandler.CSRFMiddleware(cfg, corsMiddleware(mux))
 
 	// ── Startup reconciliation ──────────────────────────────────────
 	svc.ReconcileOnStartup()

@@ -784,9 +784,10 @@ func cmdList() {
 		}
 
 		statusColor := cYellow
-		if status == "running" {
+		switch status {
+		case "running":
 			statusColor = cGreen
-		} else if status == "failed" {
+		case "failed":
 			statusColor = cRed
 		}
 

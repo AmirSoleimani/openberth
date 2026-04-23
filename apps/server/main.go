@@ -84,14 +84,17 @@ func main() {
 	mux.HandleFunc("POST /api/me/password", h.ChangePassword)
 	mux.HandleFunc("POST /api/me/rotate-key", h.RotateAPIKey)
 
-	// Browser-facing pages (gallery SPA + login + setup + root redirect).
-	// Disabled when cfg.WebDisabled is true for API/CLI/OIDC-only deployments.
+	// Auth pages always render, even with --no-web. First-time setup, local
+	// password login, and the SSO handoff are part of the OAuth / OIDC flow
+	// any MCP client needs — disabling the gallery shouldn't lock operators
+	// out of the server. Only the gallery SPA and its root landing page are
+	// gated (below + `/gallery/` further down).
+	mux.HandleFunc("GET /setup", h.SetupPage)
+	mux.HandleFunc("POST /setup", h.SetupSubmit)
+	mux.HandleFunc("GET /login", h.LoginPage)
+	mux.HandleFunc("POST /login", h.LoginSubmit)
 	if !cfg.WebDisabled {
 		mux.HandleFunc("GET /{$}", h.Index)
-		mux.HandleFunc("GET /setup", h.SetupPage)
-		mux.HandleFunc("POST /setup", h.SetupSubmit)
-		mux.HandleFunc("GET /login", h.LoginPage)
-		mux.HandleFunc("POST /login", h.LoginSubmit)
 	}
 
 	// OIDC/SSO

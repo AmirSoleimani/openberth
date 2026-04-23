@@ -54,8 +54,9 @@ func (h *Handlers) SetupPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	callback := r.URL.Query().Get("callback")
+	redirect := r.URL.Query().Get("redirect")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, setupPageHTML, html.EscapeString(callback))
+	fmt.Fprintf(w, setupPageHTML, html.EscapeString(redirect), html.EscapeString(callback))
 }
 
 func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +71,7 @@ func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	confirm := r.FormValue("confirm")
 	callback := r.FormValue("callback")
+	redirect := r.FormValue("redirect")
 
 	if username == "" || password == "" {
 		setupError(w, "Username and password are required.")
@@ -116,6 +118,13 @@ func (h *Handlers) SetupSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if callback != "" && isAllowedCallback(callback) {
 		h.redirectWithLoginCode(w, r, user.ID, callback)
+		return
+	}
+	// If setup was initiated from an OAuth consent flow (e.g. MCP login on
+	// a fresh --no-web install), land on the OAuth endpoint so the client
+	// finishes its authorization. Only safe-relative paths accepted.
+	if redirect != "" && isLocalRedirect(redirect) {
+		http.Redirect(w, r, redirect, http.StatusFound)
 		return
 	}
 
@@ -485,6 +494,7 @@ const setupPageHTML = `<!DOCTYPE html>
   <h1>OpenBerth</h1>
   <p class="subtitle">Create your admin account to get started.</p>
   <form method="POST" action="/setup">
+    <input type="hidden" name="redirect" value="%s">
     <input type="hidden" name="callback" value="%s">
     <div class="form-group">
       <label for="username">Username</label>

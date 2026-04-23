@@ -193,13 +193,10 @@ func (o *OAuthHandlers) authorizeGet(w http.ResponseWriter, r *http.Request) {
 		user = o.auth(r)
 	}
 	if user == nil {
-		// When the web login page is disabled, route unauthenticated OAuth
-		// requests through OIDC — the sanctioned login path in API-only mode.
-		// If OIDC isn't configured, OIDCStart returns its own error.
+		// /login always serves regardless of cfg.WebDisabled — it's part of
+		// the OAuth / OIDC flow, not the gallery. If OIDC is configured, the
+		// login page surfaces the SSO button; sso_only mode auto-redirects.
 		loginURL := fmt.Sprintf("/login?redirect=%s", url.QueryEscape(r.URL.String()))
-		if o.cfg.WebDisabled {
-			loginURL = fmt.Sprintf("/auth/oidc/start?redirect=%s", url.QueryEscape(r.URL.String()))
-		}
 		http.Redirect(w, r, loginURL, http.StatusFound)
 		return
 	}

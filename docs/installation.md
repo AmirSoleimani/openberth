@@ -72,6 +72,29 @@ The installer automatically copies itself to `/usr/local/bin/berth-server` — y
 | `--default-ttl` | `72` | Default deployment TTL in hours |
 | `--cloudflare` | off | Use Cloudflare proxy mode (internal TLS, no ACME) |
 | `--insecure` | off | Run without SSL/TLS (HTTP only, mutually exclusive with `--cloudflare`) |
+| `--flat-urls` | off | Publish deploys at `<name>-openberth.example.com` (siblings) instead of `<name>.openberth.example.com` (nested), so one `*.example.com` apex cert covers every deploy. See [Flat vs nested URLs](#flat-vs-nested-urls). |
+
+## Flat vs nested URLs
+
+By default, every deploy is published one DNS label below your install domain:
+
+```
+install domain → https://openberth.example.com/
+deploy "blog"  → https://blog.openberth.example.com/
+deploy "api"   → https://api.openberth.example.com/
+```
+
+This is the **nested** shape. One wildcard cert at `*.openberth.example.com` (typically issued via DNS-01) covers every current and future deploy with no per-deploy DNS or cert work. It's the right default for most installs.
+
+If you'd rather have a single wildcard cert at the apex (`*.example.com`) cover every deploy — for example to consolidate cert management to one apex wildcard, or when DNS-01 isn't available below the apex — install with `--flat-urls`:
+
+```
+install domain → https://openberth.example.com/
+deploy "blog"  → https://blog-openberth.example.com/
+deploy "api"   → https://api-openberth.example.com/
+```
+
+In flat mode every deploy lives **one label below the apex** (sibling to the install domain, joined by `-`). A single `*.example.com` cert at the apex covers every deploy. Pick this only if you control the apex DNS and TLS — most installs want the default nested shape.
 
 **What the installer does (20 steps):**
 

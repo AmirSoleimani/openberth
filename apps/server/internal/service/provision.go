@@ -380,11 +380,9 @@ func fwInfo(fw *framework.FrameworkInfo) *frameworkInfo {
 	}
 }
 
-// deployURL builds the full URL for a subdomain.
+// deployURL builds the full URL for a subdomain. Delegates to the
+// proxy so the URL shape (nested vs flat per FlatURLs) and scheme are
+// composed in exactly one place.
 func (svc *Service) deployURL(subdomain string) string {
-	scheme := "https"
-	if svc.Cfg.Insecure {
-		scheme = "http"
-	}
-	return fmt.Sprintf("%s://%s.%s", scheme, subdomain, svc.Cfg.Domain)
+	return svc.Proxy.DeployURL(subdomain)
 }

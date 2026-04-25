@@ -57,6 +57,45 @@ func (p *ProxyManager) buildAuthBlock(ac *AccessControl) string {
 	return ""
 }
 
+// composeFQDN returns the customer-visible deploy hostname for `subdomain`,
+// keyed off the install-time URL shape:
+//
+//   FlatURLs=false (default):  <subdomain>.<Domain>
+//                              e.g. "blog" + "acme.example.com" → "blog.acme.example.com"
+//   FlatURLs=true:             <subdomain>-<workspace>.<apex>
+//                              e.g. "blog" + "acme.example.com" → "blog-acme.example.com"
+//
+// The flat shape places every deploy exactly one DNS label below
+// the apex, so a single `*.<apex>` wildcard cert covers every
+// deploy across every workspace.
+func (p *ProxyManager) composeFQDN(subdomain string) string {
+	if !p.cfg.FlatURLs {
+		return subdomain + "." + p.cfg.Domain
+	}
+	// Split Domain into <workspace>.<apex> at the leftmost dot.
+	// If the Domain has no dot (single-label local dev install),
+	// fall back to the nested shape — there's no apex to share.
+	dot := strings.Index(p.cfg.Domain, ".")
+	if dot < 0 {
+		return subdomain + "." + p.cfg.Domain
+	}
+	workspace := p.cfg.Domain[:dot]
+	apex := p.cfg.Domain[dot+1:]
+	return subdomain + "-" + workspace + "." + apex
+}
+
+// DeployURL returns the full scheme+host URL for a deploy, honoring
+// the install-time URL shape (FlatURLs) and the install-time scheme
+// (Insecure). Callers outside this package use this so there's one
+// place that knows how a deploy URL is composed.
+func (p *ProxyManager) DeployURL(subdomain string) string {
+	scheme := "https"
+	if p.cfg.Insecure {
+		scheme = "http"
+	}
+	return scheme + "://" + p.composeFQDN(subdomain)
+}
+
 func (p *ProxyManager) buildSiteConfig(fqdn, authBlock, subdomain string, hostPort int) string {
 	siteAddr := fqdn
 	tlsDirective := ""
@@ -94,7 +133,7 @@ func (p *ProxyManager) buildSiteConfig(fqdn, authBlock, subdomain string, hostPo
 }
 
 func (p *ProxyManager) AddRoute(subdomain string, hostPort int, ac *AccessControl) string {
-	fqdn := subdomain + "." + p.cfg.Domain
+	fqdn := p.composeFQDN(subdomain)
 	authBlock := p.buildAuthBlock(ac)
 	siteConfig := p.buildSiteConfig(fqdn, authBlock, subdomain, hostPort)
 
@@ -110,7 +149,7 @@ func (p *ProxyManager) AddRoute(subdomain string, hostPort int, ac *AccessContro
 }
 
 func (p *ProxyManager) AddRouteNoReload(subdomain string, hostPort int, ac *AccessControl) {
-	fqdn := subdomain + "." + p.cfg.Domain
+	fqdn := p.composeFQDN(subdomain)
 	authBlock := p.buildAuthBlock(ac)
 	siteConfig := p.buildSiteConfig(fqdn, authBlock, subdomain, hostPort)
 
@@ -147,7 +186,7 @@ func (p *ProxyManager) ListCaddyFiles() []string {
 // BlockRouteNoReload overwrites a site's Caddy config to serve 503 (quota exceeded)
 // while keeping /_data/* functional. Does not trigger a Caddy reload.
 func (p *ProxyManager) BlockRouteNoReload(subdomain string) {
-	fqdn := subdomain + "." + p.cfg.Domain
+	fqdn := p.composeFQDN(subdomain)
 	siteAddr := fqdn
 	tlsDirective := ""
 	if p.cfg.Insecure {

@@ -38,6 +38,12 @@ type Config struct {
 	WebDisabled     bool              `json:"webDisabled"`
 	MasterKey       string            `json:"masterKey"`
 
+	// FlatURLs flips the deploy-URL shape:
+	//   false → <name>.<domain>           (nested, default; needs *.<domain> wildcard)
+	//   true  → <name>-<workspace>.<apex> (sibling; covered by a single *.<apex> cert)
+	// where workspace = leftmost label of Domain and apex = the rest.
+	FlatURLs bool `json:"flatUrls,omitempty"`
+
 	// ProxySiteConfigMode sets the file mode for Caddy site-config files
 	// written under CaddySitesDir. Defaults to 0600 — those files embed
 	// basic-auth hashes and api-key secrets and must not be world-readable.

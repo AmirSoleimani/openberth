@@ -59,6 +59,8 @@ func printHelp() {
     promote [id]        Promote a sandbox to a production deployment
     list                List your deployments (--all shows everyone's with owner)
     status [id]         Get deployment details
+    stats [id]          Live CPU / memory / storage / bandwidth (--json for raw)
+    host-stats          Host CPU / memory / disk / load (admin only, --json for raw)
     logs [id]           View container logs
     protect [id]        Set access control (basic_auth, api_key, user, public)
     lock [id]           Lock deployment (reject updates until unlocked)
@@ -187,6 +189,10 @@ func main() {
 		cmdList()
 	case "status":
 		cmdStatus()
+	case "stats":
+		cmdStats()
+	case "host-stats":
+		cmdHostStats()
 	case "logs":
 		cmdLogs()
 	case "pull":

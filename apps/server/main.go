@@ -134,6 +134,7 @@ func main() {
 	mux.HandleFunc("GET /api/deployments/{id}/logs", h.GetLogs)
 	mux.HandleFunc("GET /api/deployments/{id}/logs/stream", h.StreamLogs)
 	mux.HandleFunc("GET /api/deployments/{id}/source", h.GetSource)
+	mux.HandleFunc("GET /api/deployments/{id}/stats", h.GetDeploymentStats)
 	mux.HandleFunc("POST /api/deployments/{id}/protect", h.ProtectDeployment)
 	mux.HandleFunc("POST /api/deployments/{id}/lock", h.LockDeployment)
 
@@ -147,6 +148,7 @@ func main() {
 	mux.HandleFunc("POST /api/admin/restore", h.AdminRestore)
 	mux.HandleFunc("GET /api/admin/settings", h.AdminGetSettings)
 	mux.HandleFunc("POST /api/admin/settings", h.AdminSetSettings)
+	mux.HandleFunc("GET /api/admin/host-stats", h.GetHostStats)
 
 	// OAuth 2.1
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", oauth.ProtectedResourceMetadata)

@@ -49,6 +49,40 @@ func (s *Store) GetAllBandwidthForPeriod(periodStart string) (map[string]int64, 
 	return result, nil
 }
 
+// BandwidthPeriod is one row from bandwidth_usage shaped for client display.
+type BandwidthPeriod struct {
+	PeriodStart string `json:"periodStart"`
+	BytesOut    int64  `json:"bytesOut"`
+}
+
+// GetBandwidthHistory returns up to limit most-recent period rows for a
+// deployment in descending period order (newest first). Used by the
+// stats endpoint to render a tiny bandwidth history without standing up
+// a separate time-series store.
+func (s *Store) GetBandwidthHistory(deploymentID string, limit int) ([]BandwidthPeriod, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+	rows, err := s.db.Query(
+		"SELECT period_start, bytes_out FROM bandwidth_usage WHERE deployment_id = ? ORDER BY period_start DESC LIMIT ?",
+		deploymentID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]BandwidthPeriod, 0, limit)
+	for rows.Next() {
+		var p BandwidthPeriod
+		if err := rows.Scan(&p.PeriodStart, &p.BytesOut); err != nil {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 // DeleteBandwidthBefore removes all bandwidth records with period_start before the given date.
 func (s *Store) DeleteBandwidthBefore(date string) error {
 	_, err := s.db.Exec("DELETE FROM bandwidth_usage WHERE period_start < ?", date)

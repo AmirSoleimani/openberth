@@ -272,6 +272,7 @@ export default function App() {
           <AppDetailView
             item={items.find((i) => i.id === (route as { appId: string }).appId)}
             isOwned={auth.currentUserId != null && items.find((i) => i.id === (route as { appId: string }).appId)?.ownerId === auth.currentUserId}
+            apiKey={auth.apiKey}
             onBack={() => navigate("")}
             onNavigateUser={(id) => navigate("user/" + id)}
             onToggleLock={toggleLock}

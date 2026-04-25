@@ -9,6 +9,7 @@ import { Label } from "./ui/label";
 import { CreateUserDialog } from "./dialogs/CreateUserDialog";
 import { EditUserDialog, type UserInfo } from "./dialogs/EditUserDialog";
 import { ApiKeyDialog } from "./dialogs/ApiKeyDialog";
+import { HostStatsView } from "./HostStatsView";
 import { authHeaders } from "../hooks/useAuth";
 import { formatAge } from "../lib/format";
 
@@ -198,6 +199,7 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="containers">Containers</TabsTrigger>
+          <TabsTrigger value="system">System</TabsTrigger>
         </TabsList>
         <TabsContent value="oidc" className="pt-4">
           <div className="grid gap-8 lg:grid-cols-[1fr,1fr]">
@@ -382,6 +384,10 @@ export function SettingsView({ apiKey }: SettingsViewProps) {
             </div>
             <Button onClick={handleSaveContainerSettings} disabled={settingsSaving}>{settingsSaving ? "Saving..." : "Save Container Defaults"}</Button>
           </div>
+        </TabsContent>
+
+        <TabsContent value="system" className="pt-4">
+          <HostStatsView apiKey={apiKey} />
         </TabsContent>
       </Tabs>
 

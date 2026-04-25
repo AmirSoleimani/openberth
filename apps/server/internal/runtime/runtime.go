@@ -73,8 +73,26 @@ type Runtime interface {
 	// Close the reader when done to release driver resources.
 	LogStream(instanceID string, tail int) (io.ReadCloser, error)
 
+	// Stats returns an instantaneous resource snapshot for one instance.
+	// Drivers that can't determine a value should leave it zero rather
+	// than fail. Best-effort; an error is returned only when the driver
+	// can't talk to its backend at all.
+	Stats(instanceID string) (LiveStats, error)
+
 	// Capabilities reports which optional features this driver supports.
 	Capabilities() Capabilities
+}
+
+// LiveStats is the instantaneous resource snapshot for one running
+// deployment instance. All fields are zero-valued when the driver can't
+// determine the value (e.g. container is not running, build volume is
+// not mounted, cgroup data is unavailable).
+type LiveStats struct {
+	CPUPercent       float64 // 100% = one full core
+	MemoryBytes      int64   // resident set size
+	MemoryLimitBytes int64   // configured cgroup memory limit, 0 if unset
+	PIDs             int     // active processes inside the instance
+	BuildVolumeBytes int64   // size of the build artifact volume mounted at /app
 }
 
 // DeployOpts bundles everything a driver needs to build and run an instance.

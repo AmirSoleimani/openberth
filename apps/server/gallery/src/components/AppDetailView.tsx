@@ -4,12 +4,14 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { AppIcon } from "./AppIcon";
 import { StatusDot } from "./StatusDot";
+import { StatsCard } from "./StatsCard";
 import { formatAge, formatExpiry } from "../lib/format";
 import type { GalleryItem } from "../types";
 
 interface AppDetailViewProps {
   item: GalleryItem | undefined;
   isOwned: boolean;
+  apiKey: string;
   onBack: () => void;
   onNavigateUser: (userId: string) => void;
   onToggleLock: (item: GalleryItem) => void;
@@ -82,7 +84,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-export function AppDetailView({ item, isOwned, onBack, onNavigateUser, onToggleLock, onEdit, onDestroy }: AppDetailViewProps) {
+export function AppDetailView({ item, isOwned, apiKey, onBack, onNavigateUser, onToggleLock, onEdit, onDestroy }: AppDetailViewProps) {
   if (!item) {
     return (
       <div>
@@ -162,6 +164,9 @@ export function AppDetailView({ item, isOwned, onBack, onNavigateUser, onToggleL
           <InfoRow label="Allowed Users">{item.accessUsers}</InfoRow>
         )}
       </div>
+
+      {/* Stats — owner/sharer/admin only (server enforces; UI hides when not owned to avoid 403 spam) */}
+      {isOwned && <StatsCard deploymentId={item.id} apiKey={apiKey} />}
 
       {/* Actions */}
       <div className="flex items-center gap-2">

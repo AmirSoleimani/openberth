@@ -37,6 +37,7 @@ func cmdStats() {
 	network, _ := result["network"].(map[string]any)
 
 	cpuPct := numFloat(live["cpuPercent"])
+	cpuLimitCores := numFloat(live["cpuLimitCores"])
 	memBytes := numInt(live["memoryBytes"])
 	memLimit := numInt(live["memoryLimitBytes"])
 	pids := numInt(live["pids"])
@@ -57,7 +58,19 @@ func cmdStats() {
 	fmt.Printf("  %sStatus:%s      %v\n", cBold, cReset, result["status"])
 	fmt.Println()
 	fmt.Printf("  %sLive%s\n", cBold, cReset)
-	fmt.Printf("    CPU:        %s\n", colorPct(cpuPct, "%.2f%%", cpuPct))
+	if cpuLimitCores > 0 {
+		limitPct := cpuLimitCores * 100
+		usedPctOfLimit := 0.0
+		if limitPct > 0 {
+			usedPctOfLimit = cpuPct / limitPct * 100
+		}
+		fmt.Printf("    CPU:        %s / %.0f%% (%s used, limit %g %s)\n",
+			fmt.Sprintf("%.2f%%", cpuPct), limitPct,
+			colorPct(usedPctOfLimit, "%.1f%%", usedPctOfLimit),
+			cpuLimitCores, plural(int64(cpuLimitCores+0.5), "core", "cores"))
+	} else {
+		fmt.Printf("    CPU:        %s (no limit)\n", colorPct(cpuPct, "%.2f%%", cpuPct))
+	}
 	if memLimit > 0 {
 		memPct := float64(memBytes) / float64(memLimit) * 100
 		fmt.Printf("    Memory:     %s / %s (%s)\n", formatBytes(memBytes), formatBytes(memLimit), colorPct(memPct, "%.1f%%", memPct))

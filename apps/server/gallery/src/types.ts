@@ -39,6 +39,7 @@ export interface DeploymentStats {
   status: string;
   live: {
     cpuPercent: number;
+    cpuLimitCores: number;
     memoryBytes: number;
     memoryLimitBytes: number;
     pids: number;

@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type DeployStats struct {
 // LiveStatsView is the JSON-friendly projection of runtime.LiveStats.
 type LiveStatsView struct {
 	CPUPercent       float64 `json:"cpuPercent"`
+	CPULimitCores    float64 `json:"cpuLimitCores"` // 0 when no limit; e.g. 0.5 = half a core
 	MemoryBytes      int64   `json:"memoryBytes"`
 	MemoryLimitBytes int64   `json:"memoryLimitBytes"`
 	PIDs             int     `json:"pids"`
@@ -156,10 +158,24 @@ func (svc *Service) DeploymentStats(user *store.User, id string) (*DeployStats, 
 		network.RecentPeriods = hist
 	}
 
+	// CPU limit: resolve through the same chain as deploy time
+	// (per-deploy → admin default → compiled default), then parse to cores.
+	cpuLimitCores := 0.0
+	if v, err := strconv.ParseFloat(svc.ResolveCPUs(deploy.CPUs), 64); err == nil && v > 0 {
+		cpuLimitCores = v
+	}
+
 	return &DeployStats{
-		ID:      deploy.ID,
-		Status:  deploy.Status,
-		Live:    LiveStatsView(live),
+		ID:     deploy.ID,
+		Status: deploy.Status,
+		Live: LiveStatsView{
+			CPUPercent:       live.CPUPercent,
+			CPULimitCores:    cpuLimitCores,
+			MemoryBytes:      live.MemoryBytes,
+			MemoryLimitBytes: live.MemoryLimitBytes,
+			PIDs:             live.PIDs,
+			BuildVolumeBytes: live.BuildVolumeBytes,
+		},
 		Storage: storage,
 		Network: network,
 	}, nil

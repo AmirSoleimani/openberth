@@ -132,7 +132,11 @@ export function StatsCard({ deploymentId, apiKey }: StatsCardProps) {
     );
   }
 
-  const cpuPct = Math.min(100, Math.max(0, stats.live.cpuPercent));
+  const cpuLimitPct = stats.live.cpuLimitCores > 0 ? stats.live.cpuLimitCores * 100 : 0;
+  const cpuRaw = Math.max(0, stats.live.cpuPercent);
+  const cpuBarValue = cpuLimitPct > 0
+    ? Math.min(100, (cpuRaw / cpuLimitPct) * 100)
+    : Math.min(100, cpuRaw);
   const memPct = pct(stats.live.memoryBytes, stats.live.memoryLimitBytes);
   const netPct = stats.network.quotaBytes > 0 ? pct(stats.network.usedBytes, stats.network.quotaBytes) : 0;
 
@@ -157,9 +161,13 @@ export function StatsCard({ deploymentId, apiKey }: StatsCardProps) {
       <Row
         icon={<Cpu className="h-3.5 w-3.5" />}
         label="CPU"
-        detail={`${cpuPct.toFixed(1)}%`}
+        detail={
+          cpuLimitPct > 0
+            ? `${cpuRaw.toFixed(1)}% / ${cpuLimitPct.toFixed(0)}% (${stats.live.cpuLimitCores} ${stats.live.cpuLimitCores === 1 ? "core" : "cores"})`
+            : `${cpuRaw.toFixed(1)}%`
+        }
       >
-        <Bar value={cpuPct} color={cpuPct > 80 ? "bg-red-500" : cpuPct > 50 ? "bg-amber-500" : "bg-primary"} />
+        <Bar value={cpuBarValue} color={cpuBarValue > 80 ? "bg-red-500" : cpuBarValue > 50 ? "bg-amber-500" : "bg-primary"} />
       </Row>
 
       <Row

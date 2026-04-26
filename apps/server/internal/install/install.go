@@ -38,6 +38,28 @@ type Config struct {
 	WebDisabled     bool
 	MaxDeploys      int
 	DefaultTTL      int
+	// FlatURLs publishes deploys at the SAME DNS depth as the
+	// workspace home, joined to the workspace label by `-`, instead
+	// of nesting them one label deeper.
+	//
+	//   FlatURLs=false (default, today's behavior):
+	//     workspace home → https://acme.example.com/
+	//     deploy "blog"  → https://blog.acme.example.com/
+	//     requires a wildcard cert at *.acme.example.com
+	//
+	//   FlatURLs=true:
+	//     workspace home → https://acme.example.com/
+	//     deploy "blog"  → https://blog-acme.example.com/
+	//     covered by a single *.example.com cert at the apex
+	//
+	// The flat shape lets a single apex wildcard cover every deploy
+	// across every workspace, useful when you want to consolidate
+	// cert management to one apex wildcard rather than provisioning
+	// one per workspace, or when DNS-01 isn't available below the
+	// apex. Most installs want FlatURLs=false (the default) so their
+	// existing `*.<domain>` wildcard cert covers every deploy without
+	// extra per-deploy DNS or cert work.
+	FlatURLs bool
 }
 
 func (c *Config) setDefaults() {

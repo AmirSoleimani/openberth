@@ -10,6 +10,7 @@ const configJSONTemplate = `{
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
     "webDisabled": %t,
+    "flatUrls": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",
@@ -42,6 +43,7 @@ const configJSONCloudflareTemplate = `{
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
     "webDisabled": %t,
+    "flatUrls": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",
@@ -73,6 +75,7 @@ const configJSONInsecureTemplate = `{
     "defaultTTLHours": %d,
     "defaultMaxDeploys": %d,
     "webDisabled": %t,
+    "flatUrls": %t,
     "containerDefaults": {
         "memory": "512m",
         "cpus": "0.5",

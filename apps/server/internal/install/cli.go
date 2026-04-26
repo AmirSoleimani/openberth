@@ -88,6 +88,7 @@ func Run(args []string) {
 	fs.BoolVar(&cfg.CloudflareProxy, "cloudflare", false, "Use Cloudflare proxy mode (no ACME, internal TLS)")
 	fs.BoolVar(&cfg.Insecure, "insecure", false, "Run without SSL/TLS (HTTP only)")
 	fs.BoolVar(&cfg.WebDisabled, "no-web", false, "Disable web gallery, login, and setup pages (API/CLI/OIDC-only mode)")
+	fs.BoolVar(&cfg.FlatURLs, "flat-urls", false, "Publish deploys at <name>-<workspace>.<apex> (siblings) instead of <name>.<workspace>.<apex> (nested), so a single apex wildcard cert covers every deploy.")
 
 	fs.Usage = func() {
 		fmt.Printf(`
@@ -109,6 +110,8 @@ func Run(args []string) {
     --cloudflare            Use Cloudflare proxy mode (no ACME, internal TLS)
     --insecure              Run without SSL/TLS (HTTP only)
     --no-web                Disable web gallery, login, and setup pages
+    --flat-urls             Sibling deploy URLs (<name>-<workspace>.<apex>)
+                            instead of nested (<name>.<workspace>.<apex>)
 `, cBold, cReset, cBold, cReset, cBold, cReset, cBold, cReset)
 	}
 

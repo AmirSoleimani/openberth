@@ -40,3 +40,5 @@ apps/server/gallery/tsconfig.app.tsbuildinfo
 
 # Example projects (local testing only)
 /examples/
+smoke/
+bin/

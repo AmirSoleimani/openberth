@@ -118,7 +118,7 @@ func writeConfig(ctx *Ctx) error {
 	} else if cfg.CloudflareProxy {
 		tmpl = configJSONCloudflareTemplate
 	}
-	content := fmt.Sprintf(tmpl, cfg.Domain, cfg.DefaultTTL, cfg.MaxDeploys, cfg.WebDisabled)
+	content := fmt.Sprintf(tmpl, cfg.Domain, cfg.DefaultTTL, cfg.MaxDeploys, cfg.WebDisabled, cfg.FlatURLs)
 	if err := ctx.Write(dataDir+"/config.json", content, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}

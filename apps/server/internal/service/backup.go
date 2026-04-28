@@ -16,7 +16,7 @@ import (
 
 // OpenBerth backup wire format, v1:
 //
-//   Magic       [6] = "OBBK01"
+//   Magic       [6]  e.g. "OBBK01" (server-wide) or "OBDP01" (single deployment)
 //   SaltLen     [1] = 16
 //   Salt        [16]
 //   NonceLen    [1] = 12
@@ -27,8 +27,13 @@ import (
 //
 // The tag is part of the GCM stream (not stored separately). AAD is
 // authenticated, so a backup with a tampered header fails to decrypt.
+// The 6-byte magic discriminates archive types — server-wide vs
+// single-deployment — so a deployment archive can't be mistakenly fed
+// to the server-wide restore path (or vice versa).
 const (
-	backupMagic     = "OBBK01"
+	BackupMagic           = "OBBK01" // server-wide backup
+	DeploymentBackupMagic = "OBDP01" // single-deployment backup
+
 	backupSaltLen   = 16
 	backupNonceLen  = 12
 	backupMaxAADLen = 1024
@@ -62,7 +67,14 @@ func ValidateBackupPassphrase(pass string) error {
 // WrapBackup emits the v1 header to out and returns a writer that
 // encrypts further writes. Caller writes the gzipped tar stream, then
 // Close() to flush the final GCM block. Uses Argon2id(64 MiB, t=3).
-func WrapBackup(out io.Writer, pass string, aad BackupAAD) (io.WriteCloser, error) {
+//
+// magic must be a 6-byte ASCII tag identifying the archive type
+// (typically BackupMagic for a server-wide backup, or
+// DeploymentBackupMagic for a single deployment).
+func WrapBackup(out io.Writer, pass string, magic string, aad BackupAAD) (io.WriteCloser, error) {
+	if len(magic) != 6 {
+		return nil, fmt.Errorf("backup magic must be 6 bytes, got %d", len(magic))
+	}
 	if err := ValidateBackupPassphrase(pass); err != nil {
 		return nil, err
 	}
@@ -84,7 +96,7 @@ func WrapBackup(out io.Writer, pass string, aad BackupAAD) (io.WriteCloser, erro
 		return nil, fmt.Errorf("aad too large: %d > %d", len(aadBytes), backupMaxAADLen)
 	}
 
-	if _, err := out.Write([]byte(backupMagic)); err != nil {
+	if _, err := out.Write([]byte(magic)); err != nil {
 		return nil, err
 	}
 	if _, err := out.Write([]byte{byte(backupSaltLen)}); err != nil {
@@ -124,19 +136,25 @@ func WrapBackup(out io.Writer, pass string, aad BackupAAD) (io.WriteCloser, erro
 // decryption, and returns an io.Reader that yields the decrypted
 // gzipped-tar stream. Fails fast on wrong passphrase or tampered bytes.
 //
-// If the input does not start with the v1 magic, returns
-// ErrLegacyUnencrypted so the caller can decide whether to accept the
-// older unencrypted format (gated behind an explicit opt-in flag).
-func UnwrapBackup(in io.Reader, pass string) (io.Reader, *BackupAAD, error) {
+// expectedMagic is the 6-byte tag the caller requires. Mismatch is
+// reported as a clear error so a deployment archive sent to the
+// server-wide restore (or vice-versa) is rejected rather than parsed.
+//
+// Special-case: when expectedMagic == BackupMagic AND the input doesn't
+// match it, returns LegacyUnencryptedBackupError so the server-wide
+// restore path can fall back to pre-encryption-era tarballs (gated
+// behind the legacyUnencrypted opt-in). Deployment archives have no
+// such legacy form.
+func UnwrapBackup(in io.Reader, pass string, expectedMagic string) (io.Reader, *BackupAAD, error) {
 	var magic [6]byte
 	if _, err := io.ReadFull(in, magic[:]); err != nil {
 		return nil, nil, fmt.Errorf("read magic: %w", err)
 	}
-	if string(magic[:]) != backupMagic {
-		// Give the caller enough to distinguish old-format backups
-		// from genuinely-corrupted input. Push the magic bytes back
-		// via a prefix reader so the legacy path can re-consume them.
-		return nil, nil, &LegacyUnencryptedBackupError{prefix: magic[:]}
+	if string(magic[:]) != expectedMagic {
+		if expectedMagic == BackupMagic {
+			return nil, nil, &LegacyUnencryptedBackupError{prefix: magic[:]}
+		}
+		return nil, nil, fmt.Errorf("backup magic mismatch: expected %q, got %q", expectedMagic, string(magic[:]))
 	}
 	if err := ValidateBackupPassphrase(pass); err != nil {
 		return nil, nil, err

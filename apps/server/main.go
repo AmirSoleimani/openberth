@@ -146,6 +146,8 @@ func main() {
 	mux.HandleFunc("POST /api/admin/users/{name}/rotate-key", h.AdminRotateUserKey)
 	mux.HandleFunc("GET /api/admin/backup", h.AdminBackup)
 	mux.HandleFunc("POST /api/admin/restore", h.AdminRestore)
+	mux.HandleFunc("POST /api/admin/deployments/{id}/backup", h.AdminBackupDeployment)
+	mux.HandleFunc("POST /api/admin/deployments/restore", h.AdminRestoreDeployment)
 	mux.HandleFunc("GET /api/admin/settings", h.AdminGetSettings)
 	mux.HandleFunc("POST /api/admin/settings", h.AdminSetSettings)
 	mux.HandleFunc("GET /api/admin/host-stats", h.GetHostStats)

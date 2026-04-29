@@ -316,7 +316,7 @@ func (h *Handlers) AdminBackup(w http.ResponseWriter, r *http.Request) {
 		AdminUser: user.Name,
 		Version:   h.version,
 	}
-	wrapped, err := service.WrapBackup(w, body.Passphrase, aad)
+	wrapped, err := service.WrapBackup(w, body.Passphrase, service.BackupMagic, aad)
 	if err != nil {
 		// Header already sent? Best effort — log and bail.
 		log.Printf("[backup] wrap failed: %v", err)
@@ -481,7 +481,7 @@ func (h *Handlers) AdminRestore(w http.ResponseWriter, r *http.Request) {
 	// Detect the backup format and unwrap if needed. The unwrapped reader
 	// then feeds the normal ExtractBackup gzip/tar pipeline.
 	var archive io.Reader
-	plain, _, uErr := service.UnwrapBackup(file, passphrase)
+	plain, _, uErr := service.UnwrapBackup(file, passphrase, service.BackupMagic)
 	if uErr == nil {
 		archive = plain
 	} else {

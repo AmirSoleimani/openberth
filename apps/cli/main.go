@@ -70,8 +70,8 @@ func printHelp() {
     pull [id]           Download deployment source code
     destroy [id]        Remove a deployment
     destroy --all       Remove all your deployments
-    backup              Download full server backup (admin)
-    restore <file>      Restore server from backup file (admin)
+    backup [id]         Download backup. No id = full server (admin); id = single deployment (admin)
+    restore <file>      Restore from backup. Auto-detects archive type (admin)
     login               Login via browser (sets up API key automatically)
     rotate-key          Rotate your API key (invalidates the current one)
     config              Manage CLI configuration

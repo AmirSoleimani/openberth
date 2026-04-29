@@ -294,61 +294,80 @@ func (svc *Service) RebuildAll() int {
 		if d.Status == "destroyed" {
 			continue
 		}
-
-		codeDir := filepath.Join(svc.Cfg.DeploysDir, d.ID)
-		if _, err := os.Stat(codeDir); os.IsNotExist(err) {
-			log.Printf("[restore] No source for %s, marking as failed", d.Subdomain)
-			svc.Store.UpdateDeploymentStatus(d.ID, "failed")
-			continue
+		if svc.RebuildOne(d.ID, "restore") {
+			rebuilding++
 		}
+	}
+	return rebuilding
+}
 
-		fw := framework.DetectWithOverrides(codeDir)
-		if fw == nil {
-			log.Printf("[restore] Cannot detect framework for %s, marking as failed", d.Subdomain)
-			svc.Store.UpdateDeploymentStatus(d.ID, "failed")
-			continue
-		}
-
-		userEnv := map[string]string{}
-		if d.EnvJSON != "" && d.EnvJSON != "{}" {
-			json.Unmarshal([]byte(d.EnvJSON), &userEnv)
-		}
-
-		svc.Runtime.Destroy(d.ID)
-		svc.Store.UpdateDeploymentStatus(d.ID, "building")
-		rebuilding++
-
-		go func(deploy store.Deployment, fw *framework.FrameworkInfo, env map[string]string) {
-			ac := AccessControlFromDeployment(&deploy)
-			result, err := svc.Runtime.Deploy(runtime.DeployOpts{
-				ID:           deploy.ID,
-				UserID:       deploy.UserID,
-				CodeDir:      filepath.Join(svc.Cfg.DeploysDir, deploy.ID),
-				Framework:    fw.Framework,
-				Language:     fw.Language,
-				Port:         fw.Port,
-				Image:        fw.Image,
-				RunImage:     fw.RunImage,
-				BuildCmd:     fw.BuildCmd,
-				StartCmd:     fw.StartCmd,
-				InstallCmd:   fw.InstallCmd,
-				CacheDir:     fw.CacheDir,
-				FrameworkEnv: fw.Env,
-				UserEnv:      env,
-				NetworkQuota: deploy.NetworkQuota,
-				Memory:       deploy.Memory,
-				CPUs:         deploy.CPUs,
-			})
-			if err != nil {
-				log.Printf("[restore] Rebuild failed for %s: %v", deploy.Subdomain, err)
-				svc.Store.UpdateDeploymentStatus(deploy.ID, "failed")
-				return
-			}
-			svc.Store.UpdateDeploymentRunning(deploy.ID, result.InstanceID, result.Endpoint.Port)
-			svc.Proxy.AddRoute(deploy.Subdomain, result.Endpoint.Port, ac)
-			log.Printf("[restore] Rebuilt %s on port %d", deploy.Subdomain, result.Endpoint.Port)
-		}(d, fw, userEnv)
+// RebuildOne synchronously prepares one deployment for rebuild and spawns
+// the build/start in a goroutine, returning true when rebuild is in
+// flight. logTag prefixes log lines (e.g. "restore", "deploy-restore")
+// so the same code path is recognisable in the operator's log.
+//
+// Returns false (without erroring) when the source tree is missing or
+// the framework can't be detected — both terminal states get marked
+// "failed" in the deployments row.
+func (svc *Service) RebuildOne(deployID, logTag string) bool {
+	d, _ := svc.Store.GetDeployment(deployID)
+	if d == nil {
+		log.Printf("[%s] No deployment row for %s", logTag, deployID)
+		return false
 	}
 
-	return rebuilding
+	codeDir := filepath.Join(svc.Cfg.DeploysDir, d.ID)
+	if _, err := os.Stat(codeDir); os.IsNotExist(err) {
+		log.Printf("[%s] No source for %s, marking as failed", logTag, d.Subdomain)
+		svc.Store.UpdateDeploymentStatus(d.ID, "failed")
+		return false
+	}
+
+	fw := framework.DetectWithOverrides(codeDir)
+	if fw == nil {
+		log.Printf("[%s] Cannot detect framework for %s, marking as failed", logTag, d.Subdomain)
+		svc.Store.UpdateDeploymentStatus(d.ID, "failed")
+		return false
+	}
+
+	userEnv := map[string]string{}
+	if d.EnvJSON != "" && d.EnvJSON != "{}" {
+		json.Unmarshal([]byte(d.EnvJSON), &userEnv)
+	}
+
+	svc.Runtime.Destroy(d.ID)
+	svc.Store.UpdateDeploymentStatus(d.ID, "building")
+
+	go func(deploy store.Deployment, fw *framework.FrameworkInfo, env map[string]string) {
+		ac := AccessControlFromDeployment(&deploy)
+		result, err := svc.Runtime.Deploy(runtime.DeployOpts{
+			ID:           deploy.ID,
+			UserID:       deploy.UserID,
+			CodeDir:      filepath.Join(svc.Cfg.DeploysDir, deploy.ID),
+			Framework:    fw.Framework,
+			Language:     fw.Language,
+			Port:         fw.Port,
+			Image:        fw.Image,
+			RunImage:     fw.RunImage,
+			BuildCmd:     fw.BuildCmd,
+			StartCmd:     fw.StartCmd,
+			InstallCmd:   fw.InstallCmd,
+			CacheDir:     fw.CacheDir,
+			FrameworkEnv: fw.Env,
+			UserEnv:      env,
+			NetworkQuota: deploy.NetworkQuota,
+			Memory:       deploy.Memory,
+			CPUs:         deploy.CPUs,
+		})
+		if err != nil {
+			log.Printf("[%s] Rebuild failed for %s: %v", logTag, deploy.Subdomain, err)
+			svc.Store.UpdateDeploymentStatus(deploy.ID, "failed")
+			return
+		}
+		svc.Store.UpdateDeploymentRunning(deploy.ID, result.InstanceID, result.Endpoint.Port)
+		svc.Proxy.AddRoute(deploy.Subdomain, result.Endpoint.Port, ac)
+		log.Printf("[%s] Rebuilt %s on port %d", logTag, deploy.Subdomain, result.Endpoint.Port)
+	}(*d, fw, userEnv)
+
+	return true
 }

@@ -26,6 +26,14 @@ import (
 //  3. Caddy-only internal surfaces (/internal/*, /_data/*) — credentials
 //     aren't cookie-based on those paths; they're forwarded by Caddy from
 //     tenant subdomains or the loopback auth-check flow.
+//  4. RFC 7591/6749 OAuth back-channels (/oauth/register, /oauth/token) —
+//     these are server-to-server JSON endpoints hit by MCP clients (e.g.
+//     Claude's connector) that don't carry an Origin/Referer header and
+//     have no Authorization yet (/oauth/register *is* the credential-
+//     creation step). Without this bypass, registration is 403'd before
+//     the OAuth handler runs and the connector flow dies. /oauth/authorize
+//     stays under the CSRF check because the consent POST is browser-
+//     issued with cookies and is same-origin by construction.
 func CSRFMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isUnsafeMethod(r.Method) {
@@ -38,7 +46,8 @@ func CSRFMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 		}
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/internal/") ||
-			strings.HasPrefix(p, "/_data/") || p == "/_data" {
+			strings.HasPrefix(p, "/_data/") || p == "/_data" ||
+			p == "/oauth/register" || p == "/oauth/token" {
 			next.ServeHTTP(w, r)
 			return
 		}

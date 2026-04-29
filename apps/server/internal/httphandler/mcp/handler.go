@@ -65,17 +65,13 @@ type mcpContent struct {
 // ── HTTP Handler ─────────────────────────────────────────────────────
 
 func (m *MCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		m.handlePost(w, r)
-	case http.MethodDelete:
-		w.WriteHeader(200)
-	default:
-		http.NotFound(w, r)
-	}
-}
-
-func (m *MCPHandler) handlePost(w http.ResponseWriter, r *http.Request) {
+	// Auth gate runs first so any unauthenticated probe — POST, GET, HEAD,
+	// or anything else a client uses to verify reachability — gets back the
+	// 401 + WWW-Authenticate header that points at our OAuth metadata.
+	// Without this, GET/HEAD reachability checks (e.g. Claude's MCP
+	// connector pre-flight) hit the method switch's default branch and
+	// receive a plain 404, so the client never discovers the OAuth flow
+	// and reports "couldn't reach the MCP server."
 	user := m.auth(r)
 	if user == nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -85,6 +81,21 @@ func (m *MCPHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch r.Method {
+	case http.MethodPost:
+		m.handlePost(w, r, user)
+	case http.MethodDelete:
+		// Session termination — MCP Streamable HTTP DELETE; no body required.
+		w.WriteHeader(200)
+	default:
+		// 405 with Allow tells well-behaved clients "the route exists,
+		// you just used the wrong verb" instead of the misleading 404.
+		w.Header().Set("Allow", "POST, DELETE")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (m *MCPHandler) handlePost(w http.ResponseWriter, r *http.Request, user *store.User) {
 	var req mcpRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")

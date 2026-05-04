@@ -10,10 +10,28 @@ import (
 	"github.com/AmirSoleimani/openberth/apps/server/internal/runtime"
 )
 
+// cpuStatsWarmupDelay is how long we wait between the two docker-stats
+// reads inside Stats(). 250ms is enough for the Docker daemon's
+// pre_cpu_stats cache to register the first sample, so the second
+// sample produces a meaningful CPU% delta. Lower values risk Docker
+// not having time to advance its cgroup counters; higher values just
+// add latency to every poll. Empirically 200–300ms is the sweet spot.
+const cpuStatsWarmupDelay = 250 * time.Millisecond
+
 // Stats returns an instantaneous resource snapshot for the running
-// container backing instanceID. It does not stream — every call shells
-// out to `docker stats --no-stream` once. Cheap (~50ms) but not free,
-// so callers shouldn't poll faster than a few Hz.
+// container backing instanceID.
+//
+// CPU% is a delta — `(cpu_now - cpu_previous) / elapsed`. With
+// `docker stats --no-stream` Docker computes this against whatever it
+// holds as `pre_cpu_stats`. On the first call after a quiet gap (or a
+// freshly-started container) that cache is empty and Docker returns
+// CPUPerc: 0.00%. To avoid the gallery flickering between "0%" and the
+// real value across consecutive polls, we take two samples ourselves,
+// throw the first away (its only job is to seed Docker's cache), and
+// return the second. Adds cpuStatsWarmupDelay (~250ms) per call.
+//
+// Memory, PIDs, and build-volume size are absolute readings, not
+// deltas, so they're sampled once on the second call.
 //
 // When the container isn't running the driver returns zero-valued
 // LiveStats with no error: the caller can render "0% / 0 B" in the UI
@@ -21,13 +39,19 @@ import (
 func (d *Driver) Stats(instanceID string) (runtime.LiveStats, error) {
 	name := "sc-" + instanceID
 
-	// `docker stats --no-stream --format '{{json .}}'` prints one line per
-	// container. We name a single container so the output is one line of
-	// JSON.
-	out, err := execCmd("docker", "stats", "--no-stream", "--format", "{{json .}}", name)
-	if err != nil {
+	// First sample: throw-away. Its only purpose is to populate
+	// Docker's internal pre_cpu_stats so the second sample's CPU
+	// delta is a real number, not 0.00%.
+	if _, err := execCmd("docker", "stats", "--no-stream", "--format", "{{json .}}", name); err != nil {
 		// Container missing or stopped: return zeros, not an error.
 		// `docker stats` returns non-zero for unknown containers.
+		return runtime.LiveStats{}, nil
+	}
+	time.Sleep(cpuStatsWarmupDelay)
+
+	// Second sample: this is the one we trust.
+	out, err := execCmd("docker", "stats", "--no-stream", "--format", "{{json .}}", name)
+	if err != nil {
 		return runtime.LiveStats{}, nil
 	}
 	out = strings.TrimSpace(out)

@@ -242,5 +242,19 @@ func (s *MCPServer) tools() []Tool {
 				"global": prop("boolean", "If true, delete a global secret. Default false."),
 			}, "name"),
 		},
+		{
+			Name: "berth_guide",
+			Description: "Returns OpenBerth's conventions and platform primitives — persistent /data mount, /_data document store, encrypted secrets, resource ceilings, TTL formats, access modes, framework auto-detection, sandbox/deploy decision tree.\n\nALWAYS call this once at the start of any task that uses other berth_* tools so the code you generate respects platform conventions:\n- Don't hardcode secrets — use berth_secret_set + name references\n- Don't write state to ephemeral paths — use $DATA_DIR\n- Don't exceed default memory/CPU — runtime is much tighter than build\n\nNo argument: returns an overview + the list of topics. Pass `topic` to fetch a single section (workflow, storage, secrets, limits, ttl, access, frameworks, single-file).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"topic": map[string]any{
+						"type":        "string",
+						"description": "Optional. When omitted returns the overview + topic list. When set returns the deep-dive on that topic only.",
+						"enum":        aiGuideTopicNames,
+					},
+				},
+			},
+		},
 	}
 }

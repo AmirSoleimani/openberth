@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 func (s *MCPServer) toolStatus(args json.RawMessage) *ToolResult {
@@ -328,4 +329,26 @@ func (s *MCPServer) toolSecretDelete(args json.RawMessage) *ToolResult {
 	}
 
 	return textResult(fmt.Sprintf("Secret '%s' deleted.", params.Name))
+}
+
+// toolGuide returns the markdown primer for OpenBerth conventions.
+// Pure read of static content baked into the binary — no HTTP roundtrip.
+// Mirrors the server-side handler at apps/server/internal/httphandler/mcp.
+// When `topic` is empty, returns the overview + topic list. When `topic`
+// matches a known section, returns just that section. Unknown topics
+// return an isError result with the valid choices.
+func (s *MCPServer) toolGuide(args json.RawMessage) *ToolResult {
+	var params struct {
+		Topic string `json:"topic"`
+	}
+	json.Unmarshal(args, &params)
+
+	if params.Topic == "" {
+		return textResult(aiGuideOverview)
+	}
+	if content, ok := lookupGuideTopic(params.Topic); ok {
+		return textResult(content)
+	}
+	return errorResult(fmt.Sprintf("Unknown guide topic %q. Valid topics: %s. Call berth_guide with no arguments for an overview.",
+		params.Topic, strings.Join(aiGuideTopicNames, ", ")))
 }

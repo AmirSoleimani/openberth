@@ -50,6 +50,8 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) *ToolResult {
 		return s.toolSecretList()
 	case "berth_secret_delete":
 		return s.toolSecretDelete(args)
+	case "berth_guide":
+		return s.toolGuide(args)
 	default:
 		return errorResult("Unknown tool: " + name)
 	}

@@ -138,7 +138,7 @@ func (m *MCPHandler) dispatch(req mcpRequest, user *store.User) *mcpResponse {
 					"name":    "openberth",
 					"version": m.version,
 				},
-				"instructions": "OpenBerth deploys code to live HTTPS URLs.\n\nDecision guide:\n1. ITERATIVE DEVELOPMENT (building step-by-step, multiple changes expected):\n   → berth_sandbox_create → berth_sandbox_push (instant updates) → berth_sandbox_promote (when done)\n2. ONE-SHOT DEPLOY (final code, no iteration):\n   → berth_deploy\n\nRules:\n- Call berth_list before creating new deployments to avoid duplicates.\n- After berth_deploy or berth_update, call berth_status to check build progress (builds take 15-60s). If 'failed', call berth_logs.\n- Prefer berth_sandbox_push over berth_update for active development — push is instant, update triggers a full rebuild.\n- Framework is auto-detected. If wrong or unsupported, include a .berth.json with \"language\" and \"start\" fields. Override fields: language, build, start, install, dev.",
+				"instructions": "Before generating code or calling other berth_* tools, call berth_guide once to learn OpenBerth conventions (persistent /data, /_data document store, encrypted secrets, resource ceilings, access modes).\n\nOpenBerth deploys code to live HTTPS URLs.\n\nDecision guide:\n1. ITERATIVE DEVELOPMENT (building step-by-step, multiple changes expected):\n   → berth_sandbox_create → berth_sandbox_push (instant updates) → berth_sandbox_promote (when done)\n2. ONE-SHOT DEPLOY (final code, no iteration):\n   → berth_deploy\n\nRules:\n- Call berth_list before creating new deployments to avoid duplicates.\n- After berth_deploy or berth_update, call berth_status to check build progress (builds take 15-60s). If 'failed', call berth_logs.\n- Prefer berth_sandbox_push over berth_update for active development — push is instant, update triggers a full rebuild.\n- Framework is auto-detected. If wrong or unsupported, include a .berth.json with \"language\" and \"start\" fields. Override fields: language, build, start, install, dev.",
 			},
 		}
 
@@ -234,9 +234,33 @@ func (m *MCPHandler) callTool(name string, args json.RawMessage, user *store.Use
 		return m.toolSecretList(user)
 	case "berth_secret_delete":
 		return m.toolSecretDelete(args, user)
+	case "berth_guide":
+		return m.toolGuide(args)
 	default:
 		return errorResult("Unknown tool: " + name)
 	}
+}
+
+// toolGuide returns the markdown primer for OpenBerth conventions.
+// Pure read of static content — no auth requirements beyond having
+// reached this dispatch (the MCP transport already authenticated the
+// caller). When `topic` is empty, returns the overview + topic list.
+// When `topic` matches a known section, returns just that section.
+// Unknown topics return an isError result with the valid choices.
+func (m *MCPHandler) toolGuide(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Topic string `json:"topic"`
+	}
+	json.Unmarshal(args, &params)
+
+	if params.Topic == "" {
+		return textResult(aiGuideOverview)
+	}
+	if content, ok := lookupGuideTopic(params.Topic); ok {
+		return textResult(content)
+	}
+	return errorResult(fmt.Sprintf("Unknown guide topic %q. Valid topics: %s. Call berth_guide with no arguments for an overview.",
+		params.Topic, strings.Join(aiGuideTopicNames, ", ")))
 }
 
 func (m *MCPHandler) toolDeploy(args json.RawMessage, user *store.User) *mcpToolResult {

@@ -35,6 +35,11 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "rename-domain" {
+		install.RunRename(os.Args[2:])
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
 		selfUpdate(os.Args[2:])
 		return

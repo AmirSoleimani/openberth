@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +26,13 @@ type RenameOptions struct {
 	// SkipReload suppresses the systemctl reload caddy step. Used by tests
 	// and by operators who want to stage the swap and reload manually.
 	SkipReload bool
+	// SkipRestart suppresses the systemctl restart openberth step. Without
+	// the restart the daemon's in-memory cfg still holds the old domain
+	// even though Caddy is now serving the new one — API responses, OAuth
+	// metadata, and deploy URLs would emit the stale value until the
+	// operator restarts manually. Tests set this true (no daemon to
+	// restart in a tmpdir).
+	SkipRestart bool
 	// DryRun prints planned changes and returns without writing.
 	DryRun bool
 	// Stdout/Stderr — overridable for tests; default to os.Stdout/Stderr.
@@ -32,17 +41,18 @@ type RenameOptions struct {
 
 // RenameResult summarises what changed (or would change in DryRun mode).
 type RenameResult struct {
-	OldDomain      string
-	NewDomain      string
-	ConfigPath     string
-	CaddyfilePath  string
-	SitesDir       string
-	SiteFiles      []string // basenames (e.g. "blog.caddy")
-	BackupSuffix   string
-	CaddyMode      string // "direct" | "cloudflare" | "insecure"
-	FlatURLs       bool
-	Reloaded       bool
-	DaemonHint     string
+	OldDomain     string
+	NewDomain     string
+	ConfigPath    string
+	CaddyfilePath string
+	SitesDir      string
+	SiteFiles     []string // basenames (e.g. "blog.caddy")
+	BackupSuffix  string
+	CaddyMode     string // "direct" | "cloudflare" | "insecure" — informational, derived from config flags
+	FlatURLs      bool
+	Reloaded      bool
+	Restarted     bool
+	DaemonHint    string
 }
 
 // RunRename parses CLI flags and executes the rename. Called from main.go
@@ -56,6 +66,7 @@ func RunRename(args []string) {
 		yes       bool
 		dryRun    bool
 		noReload  bool
+		noRestart bool
 	)
 	fs.StringVar(&to, "to", "", "New domain (required)")
 	fs.StringVar(&dataDir, "data-dir", "/var/lib/openberth", "Data directory holding config.json")
@@ -63,6 +74,7 @@ func RunRename(args []string) {
 	fs.BoolVar(&yes, "yes", false, "Skip confirmation prompt")
 	fs.BoolVar(&dryRun, "dry-run", false, "Print planned changes without writing")
 	fs.BoolVar(&noReload, "no-reload", false, "Skip systemctl reload caddy")
+	fs.BoolVar(&noRestart, "no-restart", false, "Skip systemctl restart openberth (leaves daemon emitting old domain)")
 
 	fs.Usage = func() {
 		fmt.Printf(`
@@ -82,18 +94,19 @@ func RunRename(args []string) {
     --yes                Skip confirmation prompt
     --dry-run            Print planned changes without applying them
     --no-reload          Don't run systemctl reload caddy
+    --no-restart         Don't run systemctl restart openberth (leaves
+                         the daemon emitting the old domain in API
+                         responses, OAuth metadata, and deploy URLs
+                         until you restart by hand)
 
   %sNOTES%s
     Updates config.json, /etc/caddy/Caddyfile and every per-deploy site
-    config under /etc/caddy/sites/, then reloads Caddy. Backups are kept
-    next to each modified file with a .bak.<timestamp> suffix.
+    config under /etc/caddy/sites/, then reloads Caddy and restarts the
+    openberth daemon. Backups are kept next to each modified file with
+    a .bak.<timestamp> suffix.
 
     DNS for *.<new-domain> must point at this server before reload, or
     new ACME cert issuance will fail and deploys will be unreachable.
-
-    Restart the openberth daemon afterwards to pick up the new BaseURL
-    used by OAuth/OIDC/SSO redirects:
-      systemctl restart openberth
 `, cBold, cReset, cBold, cReset, cBold, cReset, cBold, cReset, cBold, cReset)
 	}
 
@@ -106,11 +119,12 @@ func RunRename(args []string) {
 	}
 
 	opts := RenameOptions{
-		NewDomain:  to,
-		DataDir:    dataDir,
-		CaddyDir:   caddyDir,
-		SkipReload: noReload,
-		DryRun:     dryRun,
+		NewDomain:   to,
+		DataDir:     dataDir,
+		CaddyDir:    caddyDir,
+		SkipReload:  noReload,
+		SkipRestart: noRestart,
+		DryRun:      dryRun,
 	}
 
 	if !yes && !dryRun {
@@ -159,11 +173,18 @@ func printRenameResult(res *RenameResult, dryRun bool) {
 		} else {
 			fmt.Printf("  %s!%s Caddy NOT reloaded — run: systemctl reload caddy\n", cYellow, cReset)
 		}
+		if res.Restarted {
+			fmt.Printf("  %s✓%s openberth daemon restarted (now emitting %s)\n", cGreen, cReset, res.NewDomain)
+		} else {
+			fmt.Printf("  %s!%s openberth NOT restarted — run: systemctl restart openberth\n", cYellow, cReset)
+		}
 	}
 	fmt.Println()
 	fmt.Printf("  Next steps:\n")
 	fmt.Printf("    1. Verify DNS: *.%s → this server\n", res.NewDomain)
-	fmt.Printf("    2. %s\n", res.DaemonHint)
+	if !res.Restarted && !dryRun {
+		fmt.Printf("    2. %s\n", res.DaemonHint)
+	}
 	fmt.Println()
 }
 
@@ -212,8 +233,19 @@ func DoRename(opts RenameOptions) (*RenameResult, error) {
 		return nil, fmt.Errorf("rewrite config: %w", err)
 	}
 
-	// Plan: rewrite main Caddyfile
-	newCaddyfile := renderCaddyfile(mode, newDomain)
+	// Plan: rewrite main Caddyfile by substring-replacing the old domain.
+	// We deliberately don't re-render from the install template — operators
+	// frequently hand-edit the Caddyfile (e.g. switching to `tls internal`
+	// for Cloudflare-Full mode, adding custom directives, tightening TLS
+	// settings) and a template re-render would silently clobber those
+	// customizations. Substring replace updates every occurrence of the
+	// old domain (site address, ACME email, redirect targets) and leaves
+	// every other line untouched.
+	rawCaddyfile, err := os.ReadFile(caddyfilePath)
+	if err != nil {
+		return nil, fmt.Errorf("read Caddyfile %s: %w (run `berth-server install` first?)", caddyfilePath, err)
+	}
+	newCaddyfile := rewriteCaddyfileDomain(string(rawCaddyfile), oldDomain, newDomain)
 
 	// Plan: rewrite per-deploy site configs
 	siteFiles, err := listSiteConfigs(sitesDir)
@@ -291,7 +323,84 @@ func DoRename(opts RenameOptions) (*RenameResult, error) {
 		res.Reloaded = true
 	}
 
+	if !opts.SkipRestart {
+		// Pull the daemon's listen port from the just-written config —
+		// install can in principle override the default 3456, and the
+		// post-restart health probe needs to hit the right port.
+		port := parseConfigPort(newCfgBytes)
+		if err := restartOpenberth(port, newDomain); err != nil {
+			// Same rationale as the reload error path: files are correct,
+			// the daemon just hasn't picked them up yet. Don't rollback.
+			res.Restarted = false
+			return res, fmt.Errorf("files written and caddy reloaded, but openberth restart did not become healthy: %w (run: systemctl restart openberth)", err)
+		}
+		res.Restarted = true
+	}
+
 	return res, nil
+}
+
+// parseConfigPort pulls the daemon's listen port from raw config.json
+// bytes. Returns the install default (3456) if the field is absent — the
+// install template always writes it, but defending against a hand-edited
+// config that dropped the field costs nothing.
+func parseConfigPort(raw []byte) int {
+	var probe struct {
+		Port int `json:"port"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+	if probe.Port == 0 {
+		return 3456
+	}
+	return probe.Port
+}
+
+// restartOpenberth runs `systemctl restart openberth` and then polls the
+// daemon's /health endpoint until it reports the new domain or a deadline
+// passes. Reporting only "service started" isn't enough — the daemon
+// could come up healthy on the OLD config (e.g. if our config.json write
+// was rolled back, or systemd raced) so we explicitly check the domain
+// in the response body matches what we just wrote.
+func restartOpenberth(port int, expectedDomain string) error {
+	if err := exec.Command("systemctl", "restart", "openberth").Run(); err != nil {
+		return fmt.Errorf("systemctl restart: %w", err)
+	}
+	return waitForHealthDomain(port, expectedDomain, 30*time.Second)
+}
+
+// waitForHealthDomain polls 127.0.0.1:<port>/health until the response
+// includes "domain":"<expected>" or the deadline is reached. The poll
+// interval is short (250ms) because typical openberth startup is under
+// 3s — we want the rename to feel instant, not a polite 30s wait.
+func waitForHealthDomain(port int, expected string, timeout time.Duration) error {
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 2 * time.Second}
+	var lastErr error
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err != nil {
+			lastErr = err
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var h struct {
+			Status string `json:"status"`
+			Domain string `json:"domain"`
+		}
+		if err := json.Unmarshal(body, &h); err == nil &&
+			h.Status == "ok" && h.Domain == expected {
+			return nil
+		}
+		lastErr = fmt.Errorf("got %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		time.Sleep(250 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("timeout")
+	}
+	return fmt.Errorf("daemon never reported domain=%s within %s: %w", expected, timeout, lastErr)
 }
 
 // validateDomain enforces the same shape as install: non-empty, no scheme,
@@ -372,17 +481,25 @@ func rewriteConfigDomain(raw []byte, newDomain string) ([]byte, error) {
 	return out, nil
 }
 
-// renderCaddyfile picks the right template for the install mode and
-// substitutes the new domain. Mirrors install/steps.go writeCaddyfile.
-func renderCaddyfile(mode, domain string) string {
-	switch mode {
-	case "insecure":
-		return fmt.Sprintf(caddyfileInsecureTemplate, domain)
-	case "cloudflare":
-		return fmt.Sprintf(caddyfileCloudflareTemplate, domain)
-	default:
-		return fmt.Sprintf(caddyfileTemplate, domain, domain)
-	}
+// rewriteCaddyfileDomain replaces every occurrence of oldDomain in the
+// main Caddyfile with newDomain. Same substring-replace logic as for
+// per-deploy site configs (see rewriteSiteFQDN), and for the same reason:
+// operators hand-edit their Caddyfile in real installs (custom TLS
+// directives, security headers, additional vhosts) and a template
+// re-render would lose those edits silently.
+//
+// Substring replace touches:
+//   - the site address line (e.g. `fog.aliib.nl {` → `new.aliib.nl {`)
+//   - any `email admin@<old>` directive
+//   - any redirect target referencing the old domain
+//   - any custom directive that names the old domain
+//
+// It does NOT touch:
+//   - the `import /etc/caddy/sites/*.caddy` line (unrelated)
+//   - operator-added `tls internal`, custom headers, etc.
+//   - any line that doesn't reference the old domain string
+func rewriteCaddyfileDomain(content, oldDomain, newDomain string) string {
+	return strings.ReplaceAll(content, oldDomain, newDomain)
 }
 
 // rewriteSiteFQDN replaces every occurrence of oldDomain inside a site

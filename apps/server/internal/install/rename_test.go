@@ -3,11 +3,137 @@ package install
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// ── parseConfigPort ───────────────────────────────────────────────────────
+
+// TestParseConfigPort — the port lives in config.json next to the domain;
+// the post-restart health probe needs to hit the right TCP port. Default
+// to 3456 (install template default) when the field is absent.
+func TestParseConfigPort(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{"explicit", `{"domain":"x","port":4000}`, 4000},
+		{"absent",   `{"domain":"x"}`, 3456},
+		{"zero",     `{"domain":"x","port":0}`, 3456},
+		{"invalid",  `not json`, 3456},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseConfigPort([]byte(tc.raw))
+			if got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// ── waitForHealthDomain ───────────────────────────────────────────────────
+
+// healthFixture spins up an httptest server on a chosen 127.0.0.1 port
+// (so waitForHealthDomain can reach it via the same URL shape it uses in
+// production) and returns a handle to mutate the response body live —
+// simulating a daemon that's still booting.
+type healthFixture struct {
+	server *httptest.Server
+	port   int
+	body   atomic.Value // string
+}
+
+func newHealthFixture(t *testing.T, initialBody string) *healthFixture {
+	t.Helper()
+	// Bind a free local port so waitForHealthDomain hits 127.0.0.1:<port>
+	// the same way it would in production.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	hf := &healthFixture{port: listener.Addr().(*net.TCPAddr).Port}
+	hf.body.Store(initialBody)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(hf.body.Load().(string)))
+	})
+	srv := &http.Server{Handler: mux}
+	hf.server = &httptest.Server{
+		Listener: listener,
+		Config:   srv,
+	}
+	hf.server.Start()
+	t.Cleanup(hf.server.Close)
+	return hf
+}
+
+func (hf *healthFixture) setBody(body string) { hf.body.Store(body) }
+
+// TestWaitForHealthDomain_AlreadyHealthy — the common path: daemon is
+// serving the new domain by the time we poll, return immediately.
+func TestWaitForHealthDomain_AlreadyHealthy(t *testing.T) {
+	hf := newHealthFixture(t, `{"status":"ok","domain":"new.example.com"}`)
+	start := time.Now()
+	if err := waitForHealthDomain(hf.port, "new.example.com", 5*time.Second); err != nil {
+		t.Fatalf("expected nil, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 1*time.Second {
+		t.Errorf("returned in %s, expected near-immediate", elapsed)
+	}
+}
+
+// TestWaitForHealthDomain_BecomesHealthy — daemon initially reports the
+// old domain (not yet restarted) and only flips to the new one after a
+// brief delay. The poll must keep going until the body matches.
+func TestWaitForHealthDomain_BecomesHealthy(t *testing.T) {
+	hf := newHealthFixture(t, `{"status":"ok","domain":"old.example.com"}`)
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		hf.setBody(`{"status":"ok","domain":"new.example.com"}`)
+	}()
+	if err := waitForHealthDomain(hf.port, "new.example.com", 3*time.Second); err != nil {
+		t.Errorf("expected nil after flip, got: %v", err)
+	}
+}
+
+// TestWaitForHealthDomain_TimeoutWhenStaleDomain — daemon comes up
+// healthy but with the wrong domain. Surface a timeout so the caller
+// knows to investigate (it's a real failure mode: rolled-back config,
+// systemd race, stale binary).
+func TestWaitForHealthDomain_TimeoutWhenStaleDomain(t *testing.T) {
+	hf := newHealthFixture(t, `{"status":"ok","domain":"old.example.com"}`)
+	err := waitForHealthDomain(hf.port, "new.example.com", 600*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "never reported domain=new.example.com") {
+		t.Errorf("error should mention domain mismatch, got: %v", err)
+	}
+}
+
+// TestWaitForHealthDomain_TimeoutWhenUnreachable — port nothing listens
+// on. Connection-refused on every poll, timeout error after the deadline.
+func TestWaitForHealthDomain_TimeoutWhenUnreachable(t *testing.T) {
+	// Pick a port and immediately close it so we know nothing is bound.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	if err := waitForHealthDomain(port, "x", 600*time.Millisecond); err == nil {
+		t.Errorf("expected timeout error against unreachable port, got nil")
+	}
+}
 
 // ── parseConfigDomain ─────────────────────────────────────────────────────
 
@@ -139,67 +265,104 @@ func TestRewriteConfigDomain_TrailingNewline(t *testing.T) {
 	}
 }
 
-// ── renderCaddyfile ───────────────────────────────────────────────────────
+// ── rewriteCaddyfileDomain ────────────────────────────────────────────────
 
-// TestRenderCaddyfile — each mode yields a structurally valid Caddyfile
-// that embeds the new domain in every spot the install template put it.
-func TestRenderCaddyfile(t *testing.T) {
+// TestRewriteCaddyfileDomain_PreservesCustomizations — the production-bug
+// regression test. Operators hand-edit their Caddyfile (e.g. switching
+// to `tls internal` for Cloudflare-Full mode where Cloudflare terminates
+// the public TLS and accepts a self-signed origin cert). A previous
+// implementation re-rendered from the install template and silently lost
+// those edits; substring-replace must keep every line that doesn't name
+// the old domain.
+func TestRewriteCaddyfileDomain_PreservesCustomizations(t *testing.T) {
+	original := `{
+    admin localhost:2019
+}
+
+fog.aliib.nl {
+    tls internal
+    reverse_proxy localhost:3456
+}
+
+import /etc/caddy/sites/*.caddy
+`
+	got := rewriteCaddyfileDomain(original, "fog.aliib.nl", "new.example.com")
+
+	mustContain := []string{
+		"new.example.com {",            // site address rewritten
+		"tls internal",                 // operator's customization preserved
+		"reverse_proxy localhost:3456", // upstream preserved
+		"import /etc/caddy/sites/*.caddy",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(got, s) {
+			t.Errorf("missing %q in:\n%s", s, got)
+		}
+	}
+	if strings.Contains(got, "fog.aliib.nl") {
+		t.Errorf("old domain still present:\n%s", got)
+	}
+	// Lines we never wrote must never appear — guards against an accidental
+	// drift back to the template-render approach.
+	mustNotContain := []string{
+		"acme_ca",
+		"email admin@",
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(got, s) {
+			t.Errorf("should NOT contain %q (would mean template-render regressed):\n%s", s, got)
+		}
+	}
+}
+
+// TestRewriteCaddyfileDomain_RewritesEmailDirective — when the install
+// template's `email admin@<old>` line is present, it should follow the
+// rename so ACME registers under the new domain.
+func TestRewriteCaddyfileDomain_RewritesEmailDirective(t *testing.T) {
+	original := `{
+    admin localhost:2019
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+    email admin@old.example.com
+}
+
+old.example.com {
+    reverse_proxy localhost:3456
+}
+`
+	got := rewriteCaddyfileDomain(original, "old.example.com", "new.example.com")
+	if !strings.Contains(got, "email admin@new.example.com") {
+		t.Errorf("email directive not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, "new.example.com {") {
+		t.Errorf("site address not rewritten:\n%s", got)
+	}
+	if strings.Contains(got, "old.example.com") {
+		t.Errorf("old domain still present:\n%s", got)
+	}
+}
+
+// TestRewriteCaddyfileDomain_AllThreeInstallTemplates — fresh installs
+// that haven't been hand-edited still rewrite cleanly. Pinning each
+// install-template variant prevents regressions.
+func TestRewriteCaddyfileDomain_AllThreeInstallTemplates(t *testing.T) {
 	cases := []struct {
-		mode        string
-		domain      string
-		mustContain []string
-		mustNotContain []string
+		name     string
+		template string
+		oldArgs  []any
 	}{
-		{
-			mode:   "direct",
-			domain: "new.example.com",
-			mustContain: []string{
-				"acme_ca https://acme-v02.api.letsencrypt.org/directory",
-				"email admin@new.example.com",
-				"new.example.com {",
-				"reverse_proxy localhost:3456",
-				"import /etc/caddy/sites/*.caddy",
-			},
-		},
-		{
-			mode:   "cloudflare",
-			domain: "edge.example.com",
-			mustContain: []string{
-				"edge.example.com {",
-				"tls internal",
-				"import /etc/caddy/sites/*.caddy",
-			},
-			mustNotContain: []string{
-				"acme_ca",
-				"email admin@",
-			},
-		},
-		{
-			mode:   "insecure",
-			domain: "local.dev",
-			mustContain: []string{
-				"auto_https off",
-				"http://local.dev {",
-				"import /etc/caddy/sites/*.caddy",
-			},
-			mustNotContain: []string{
-				"tls",
-				"acme_ca",
-			},
-		},
+		{"direct", caddyfileTemplate, []any{"old.example.com", "old.example.com"}},
+		{"cloudflare", caddyfileCloudflareTemplate, []any{"old.example.com"}},
+		{"insecure", caddyfileInsecureTemplate, []any{"old.example.com"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.mode, func(t *testing.T) {
-			out := renderCaddyfile(tc.mode, tc.domain)
-			for _, s := range tc.mustContain {
-				if !strings.Contains(out, s) {
-					t.Errorf("mode=%s missing %q in:\n%s", tc.mode, s, out)
-				}
+		t.Run(tc.name, func(t *testing.T) {
+			original := fmt.Sprintf(tc.template, tc.oldArgs...)
+			got := rewriteCaddyfileDomain(original, "old.example.com", "new.example.com")
+			if strings.Contains(got, "old.example.com") {
+				t.Errorf("%s: old domain still present:\n%s", tc.name, got)
 			}
-			for _, s := range tc.mustNotContain {
-				if strings.Contains(out, s) {
-					t.Errorf("mode=%s should NOT contain %q in:\n%s", tc.mode, s, out)
-				}
+			if !strings.Contains(got, "new.example.com") {
+				t.Errorf("%s: new domain missing:\n%s", tc.name, got)
 			}
 		})
 	}
@@ -400,6 +563,7 @@ func TestDoRename_DirectMode(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	})
 	if err != nil {
 		t.Fatalf("DoRename: %v", err)
@@ -441,6 +605,7 @@ func TestDoRename_CloudflareMode(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	}); err != nil {
 		t.Fatalf("DoRename: %v", err)
 	}
@@ -467,6 +632,7 @@ func TestDoRename_InsecureMode(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	}); err != nil {
 		t.Fatalf("DoRename: %v", err)
 	}
@@ -496,6 +662,7 @@ func TestDoRename_FlatURLsMode(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	}); err != nil {
 		t.Fatalf("DoRename: %v", err)
 	}
@@ -525,6 +692,7 @@ func TestDoRename_DryRun(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 		DryRun:     true,
 	})
 	if err != nil {
@@ -556,6 +724,7 @@ func TestDoRename_RejectsSameDomain(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "matches current") {
 		t.Errorf("expected same-domain rejection, got: %v", err)
@@ -571,6 +740,7 @@ func TestDoRename_RejectsMissingConfig(t *testing.T) {
 		DataDir:    tmp,
 		CaddyDir:   filepath.Join(tmp, "caddy"),
 		SkipReload: true,
+		SkipRestart: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "config.json") {
 		t.Errorf("expected missing-config error, got: %v", err)
@@ -588,9 +758,69 @@ func TestDoRename_RejectsBadDomain(t *testing.T) {
 			DataDir:    dataDir,
 			CaddyDir:   caddyDir,
 			SkipReload: true,
+		SkipRestart: true,
 		}); err == nil {
 			t.Errorf("DoRename should reject %q", d)
 		}
+	}
+}
+
+// TestDoRename_PreservesCustomCaddyfile — end-to-end version of the
+// regression. Hand-customized Caddyfile (using `tls internal` instead of
+// the default ACME directives) must survive the rename. The bug this
+// regression-tests against was caught on a real production host where
+// fog.aliib.nl was running behind Cloudflare-Full mode with a custom
+// `tls internal` Caddyfile and the rename clobbered it.
+func TestDoRename_PreservesCustomCaddyfile(t *testing.T) {
+	dataDir := t.TempDir()
+	caddyDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(caddyDir, "sites"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(dataDir, "config.json"), `{
+    "domain": "fog.aliib.nl",
+    "port": 3456,
+    "cloudflareProxy": false,
+    "insecure": false
+}`)
+	customCaddyfile := `{
+    admin localhost:2019
+}
+
+fog.aliib.nl {
+    tls internal
+    reverse_proxy localhost:3456
+}
+
+import /etc/caddy/sites/*.caddy
+`
+	mustWrite(t, filepath.Join(caddyDir, "Caddyfile"), customCaddyfile)
+
+	if _, err := DoRename(RenameOptions{
+		NewDomain:  "new.aliib.nl",
+		DataDir:    dataDir,
+		CaddyDir:   caddyDir,
+		SkipReload: true,
+		SkipRestart: true,
+	}); err != nil {
+		t.Fatalf("DoRename: %v", err)
+	}
+
+	got := mustRead(t, filepath.Join(caddyDir, "Caddyfile"))
+	// Customization preserved.
+	if !strings.Contains(got, "tls internal") {
+		t.Errorf("custom `tls internal` directive lost:\n%s", got)
+	}
+	// Domain swapped.
+	if !strings.Contains(got, "new.aliib.nl {") {
+		t.Errorf("site address not rewritten:\n%s", got)
+	}
+	if strings.Contains(got, "fog.aliib.nl") {
+		t.Errorf("old domain still present:\n%s", got)
+	}
+	// Install-template-only directives not injected.
+	if strings.Contains(got, "acme_ca") || strings.Contains(got, "email admin@") {
+		t.Errorf("install-template directives leaked into custom Caddyfile:\n%s", got)
 	}
 }
 
@@ -607,6 +837,7 @@ func TestDoRename_NoDeploysYet(t *testing.T) {
 		DataDir:    dataDir,
 		CaddyDir:   caddyDir,
 		SkipReload: true,
+		SkipRestart: true,
 	})
 	if err != nil {
 		t.Fatalf("DoRename with no deploys: %v", err)
